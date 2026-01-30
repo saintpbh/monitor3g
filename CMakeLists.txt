@@ -53,12 +53,16 @@ include_directories(
     ${DECKLINK_INCLUDE_DIRS}
 )
 
+# Library directories
+link_directories(${FFMPEG_LIBRARY_DIRS})
+
 # Source files
 set(SOURCES
     src/main.cpp
     src/core/DeckLinkDevice.cpp
     src/core/DeckLinkOutput.cpp
     src/core/DeviceMonitor.cpp
+    src/core/DeckLinkAPIDispatch.cpp
     src/sources/AbstractSource.cpp
     src/sources/VideoFileSource.cpp
     src/sources/ImageSource.cpp

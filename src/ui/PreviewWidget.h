@@ -2,7 +2,6 @@
 #define PREVIEWWIDGET_H
 
 #include <QLabel>
-#include <QOpenGLWidget>
 #include <QWidget>
 
 namespace Monitor3G {
