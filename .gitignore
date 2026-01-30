@@ -1,0 +1,75 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+.cmake/
+
+# IDE specific
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.vcxproj.filters
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.app
+*.dylib
+*.so
+*.dll
+*.a
+*.lib
+
+# Qt specific
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.qm
+.qmake.stash
+Makefile*
+*.pro.user*
+
+# macOS
+.DS_Store
+*.dSYM/
+*.app
+
+# Windows
+*.pdb
+*.ilk
+*.exp
+
+# Logs
+*.log
+monitor3g.log
+
+# Third-party libraries (download separately)
+libs/decklink-sdk/
+
+# Backup files
+*~
+*.bak
+*.swp
+
+# Package files
+*.dmg
+*.pkg
+*.msi
+*.zip
+*.tar.gz
+
+# Generated documentation
+docs/html/
+docs/latex/
+
+# Resources (if large)
+resources/test_videos/
+resources/test_images/
+
+# Temporary files
+tmp/
+temp/
