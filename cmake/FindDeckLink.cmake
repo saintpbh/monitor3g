@@ -1,7 +1,6 @@
 # FindDeckLink.cmake - Locate Blackmagic DeckLink SDK
 
 if(APPLE)
-    # macOS paths
     set(DECKLINK_SEARCH_PATHS
         "${CMAKE_SOURCE_DIR}/libs/decklink-sdk"
         "/Library/Application Support/Blackmagic Design/Blackmagic DeckLink"
@@ -14,16 +13,16 @@ if(APPLE)
         PATH_SUFFIXES include Mac/include
     )
     
-    # On macOS, DeckLink is header-only with system frameworks
-    if(DECKLINK_INCLUDE_DIR)
+    find_library(DECKLINK_FRAMEWORK
+        NAMES DeckLink
+        PATHS ${DECKLINK_SEARCH_PATHS} /Library/Frameworks
+        PATH_SUFFIXES .framework
+    )
+
+    if(DECKLINK_INCLUDE_DIR AND DECKLINK_FRAMEWORK)
         set(DECKLINK_FOUND TRUE)
         set(DECKLINK_INCLUDE_DIRS ${DECKLINK_INCLUDE_DIR})
-        set(DECKLINK_LIBRARIES "")
-        
-        # Add required macOS frameworks
-        find_library(COREFOUNDATION CoreFoundation)
-        find_library(COREVIDEO CoreVideo)
-        list(APPEND DECKLINK_LIBRARIES ${COREFOUNDATION} ${COREVIDEO})
+        set(DECKLINK_LIBRARIES ${DECKLINK_FRAMEWORK})
     endif()
     
 elseif(WIN32)

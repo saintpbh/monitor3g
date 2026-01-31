@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Monitor3G VERSION 1.0.0 LANGUAGES CXX)
+project(Monitor3G VERSION 1.0.4 LANGUAGES CXX)
 
 # C++ Standard
 set(CMAKE_CXX_STANDARD 17)
@@ -14,7 +14,7 @@ set(CMAKE_AUTOUIC ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia OpenGL)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia OpenGLWidgets)
 
 # Find FFmpeg
 find_package(PkgConfig REQUIRED)
@@ -28,6 +28,9 @@ pkg_check_modules(FFMPEG REQUIRED
 
 # Find DeckLink SDK
 find_package(DeckLink REQUIRED)
+find_package(DeckLink REQUIRED)
+message(STATUS "DECKLINK_INCLUDE_DIRS: ${DECKLINK_INCLUDE_DIRS}")
+message(STATUS "DECKLINK_LIBRARIES: ${DECKLINK_LIBRARIES}")
 
 # Platform-specific settings
 if(APPLE)
@@ -51,6 +54,8 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/src
     ${FFMPEG_INCLUDE_DIRS}
     ${DECKLINK_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/libs/decklink-sdk/Mac/include
+    ${Qt6_OPENGL_INCLUDE_DIRS}
 )
 
 # Source files
@@ -75,6 +80,7 @@ set(SOURCES
     src/ui/PDFNavigator.cpp
     src/utils/Logger.cpp
     src/utils/ErrorHandler.cpp
+    libs/decklink-sdk/Mac/include/DeckLinkAPIDispatch.cpp
 )
 
 # Header files
@@ -109,8 +115,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Widgets
     Qt6::Gui
     Qt6::Multimedia
-    Qt6::OpenGL
-    ${FFMPEG_LIBRARIES}
+    Qt6::OpenGLWidgets
+    ${FFMPEG_LIBRARY_DIRS}/libavformat.dylib
+    ${FFMPEG_LIBRARY_DIRS}/libavcodec.dylib
+    ${FFMPEG_LIBRARY_DIRS}/libswscale.dylib
+    ${FFMPEG_LIBRARY_DIRS}/libswresample.dylib
+    ${FFMPEG_LIBRARY_DIRS}/libavutil.dylib
     ${DECKLINK_LIBRARIES}
     ${PLATFORM_LIBS}
 )
