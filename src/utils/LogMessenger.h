@@ -1,17 +1,22 @@
 #ifndef LOGMESSENGER_H
 #define LOGMESSENGER_H
 
+#include "Logger.h"
 #include <QObject>
 #include <QString>
 
 namespace Monitor3G {
 
-enum class LogLevel { DEBUG, INFO, WARNING, ERROR, CRITICAL };
-
 class LogMessenger : public QObject {
   Q_OBJECT
+public:
+  explicit LogMessenger(QObject *parent = nullptr) : QObject(parent) {
+    Logger::instance().addCallback(
+        [this](LogLevel level, const QString &msg) { emit logReceived(msg); });
+  }
+
 signals:
-  void logReceived(const QString &message, Monitor3G::LogLevel level);
+  void logReceived(const QString &message);
 };
 
 } // namespace Monitor3G

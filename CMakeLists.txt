@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Monitor3G VERSION 1.0.4 LANGUAGES CXX)
+project(Monitor3G VERSION 1.0.6 LANGUAGES CXX)
 
 # C++ Standard
 set(CMAKE_CXX_STANDARD 17)
@@ -71,6 +71,7 @@ set(SOURCES
     src/sources/ScreenCaptureSource.cpp
     src/sources/PDFSource.cpp
     src/sources/SourceManager.cpp
+    src/sources/TestPatternSource.cpp
     src/output/OutputFormat.cpp
     src/output/OutputConfig.cpp
     src/ui/MainWindow.cpp
@@ -80,6 +81,7 @@ set(SOURCES
     src/ui/PDFNavigator.cpp
     src/utils/Logger.cpp
     src/utils/ErrorHandler.cpp
+    src/ui/DeveloperConsole.cpp
     libs/decklink-sdk/Mac/include/DeckLinkAPIDispatch.cpp
 )
 
@@ -95,6 +97,7 @@ set(HEADERS
     src/sources/ScreenCaptureSource.h
     src/sources/PDFSource.h
     src/sources/SourceManager.h
+    src/sources/TestPatternSource.h
     src/output/OutputFormat.h
     src/output/OutputConfig.h
     src/ui/MainWindow.h
@@ -102,7 +105,9 @@ set(HEADERS
     src/ui/PreviewWidget.h
     src/ui/ControlPanel.h
     src/ui/PDFNavigator.h
+    src/ui/DeveloperConsole.h
     src/utils/Logger.h
+    src/utils/LogMessenger.h
     src/utils/ErrorHandler.h
 )
 

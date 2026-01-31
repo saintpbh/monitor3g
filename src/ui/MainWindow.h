@@ -1,11 +1,9 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include <QComboBox>
 #include <QLabel>
 #include <QMainWindow>
 #include <QPushButton>
-#include <QStatusBar>
 #include <memory>
 
 namespace Monitor3G {
@@ -14,6 +12,10 @@ class SourcePanel;
 class PreviewWidget;
 class ControlPanel;
 class DeckLinkDevice;
+class DeckLinkOutput;
+class TestPatternSource;
+class AbstractSource;
+class DeveloperConsole;
 
 class MainWindow : public QMainWindow {
   Q_OBJECT
@@ -29,6 +31,7 @@ private slots:
   void onDeviceStatusChanged(bool connected);
   void onOutputStarted();
   void onOutputStopped();
+  void onTestPatternRequest(bool active);
 
 private:
   void setupUI();
@@ -36,18 +39,29 @@ private:
   void createStatusBar();
   void updateWindowTitle();
 
-  // UI Components
+  // Panels
   SourcePanel *m_sourcePanel;
-  PreviewWidget *m_previewWidget;
   ControlPanel *m_controlPanel;
+  DeveloperConsole *m_console;
 
-  // Status bar widgets
+  // Monitors
+  PreviewWidget *m_previewMonitor; // Left
+  PreviewWidget *m_programMonitor; // Right
+
+  // Cut/Auto Buttons
+  QPushButton *m_cutBtn;
+  QPushButton *m_autoBtn;
+
+  // Status
   QLabel *m_statusLabel;
   QLabel *m_deviceLabel;
   QLabel *m_fpsLabel;
 
   // Core components
   std::unique_ptr<DeckLinkDevice> m_device;
+  DeckLinkOutput *m_output;
+  TestPatternSource *m_testPatternSource;
+  AbstractSource *m_currentMainSource; // Track selected media source
 };
 
 } // namespace Monitor3G

@@ -1,164 +1,262 @@
 #include "MainWindow.h"
 #include "../core/DeckLinkDevice.h"
+#include "../core/DeckLinkOutput.h"
+#include "../sources/TestPatternSource.h"
 #include "../utils/Logger.h"
 #include "ControlPanel.h"
+#include "DeveloperConsole.h"
 #include "PreviewWidget.h"
 #include "SourcePanel.h"
 
 #include <QAction>
 #include <QCloseEvent>
 #include <QHBoxLayout>
-#include <QMenu>
 #include <QMenuBar>
-#include <QMessageBox>
+#include <QPushButton>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QVBoxLayout>
 
 namespace Monitor3G {
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), m_sourcePanel(nullptr), m_previewWidget(nullptr),
-      m_controlPanel(nullptr), m_statusLabel(nullptr), m_deviceLabel(nullptr),
-      m_fpsLabel(nullptr) {
+    : QMainWindow(parent), m_sourcePanel(nullptr), m_controlPanel(nullptr),
+      m_console(nullptr), m_previewMonitor(nullptr), m_programMonitor(nullptr),
+      m_output(nullptr), m_testPatternSource(nullptr),
+      m_currentMainSource(nullptr) {
+
+  // Dark Theme
+  setStyleSheet("QMainWindow { background-color: #2b2b2b; color: #e0e0e0; }");
+
   setupUI();
   createMenuBar();
   createStatusBar();
   updateWindowTitle();
 
-  // Initialize device
+  // Initialize Core Systems
   m_device = std::make_unique<DeckLinkDevice>();
+  m_output = new DeckLinkOutput(this);
+  m_testPatternSource = new TestPatternSource(this);
+  m_testPatternSource->setPattern(TestPattern::ColorBars); // Default to bars
 
-  LOG_INFO("MainWindow initialized");
+  // Try to open first DeckLink device
+  if (m_device->openDevice(0)) {
+    LOG_INFO("Opened DeckLink device: " + m_device->getDeviceName());
+    if (m_output->initialize(m_device->getDeckLinkInterface())) {
+      LOG_INFO("DeckLink Output initialized successfully");
+      m_deviceLabel->setText("DEVICE: " + m_device->getDeviceName());
+      m_deviceLabel->setStyleSheet("color: #00ff00;"); // Green for OK
+    } else {
+      LOG_ERROR("Failed to initialize DeckLink Output");
+      m_deviceLabel->setText("DEVICE: ERROR");
+      m_deviceLabel->setStyleSheet("color: #ff0000;");
+    }
+  } else {
+    LOG_WARNING("No DeckLink device found. Running in Simulation Mode.");
+    m_deviceLabel->setText("DEVICE: SIMULATION");
+    m_deviceLabel->setStyleSheet("color: #ffff00;"); // Yellow for Sim
+    m_deviceLabel->setStyleSheet("color: #ffff00;"); // Yellow for Sim
+  }
+
+  // Monitor Connections
+  connect(m_output, &DeckLinkOutput::videoFrameArrived, m_previewMonitor,
+          &PreviewWidget::setFrame);
+  connect(m_output, &DeckLinkOutput::videoFrameArrived, m_programMonitor,
+          &PreviewWidget::setFrame);
+
+  LOG_INFO("MainWindow initialized - Hardware Console Mode");
 }
 
-MainWindow::~MainWindow() { LOG_INFO("MainWindow destroyed"); }
+MainWindow::~MainWindow() {
+  if (m_output) {
+    m_output->stop();
+  }
+  if (m_device) {
+    m_device->closeDevice();
+  }
+  LOG_INFO("MainWindow destroyed");
+}
 
 void MainWindow::setupUI() {
-  // Set window properties
-  setMinimumSize(1200, 700);
-  resize(1400, 800);
+  setMinimumSize(1280, 800);
+  resize(1400, 900);
 
-  // Create central widget
   QWidget *centralWidget = new QWidget(this);
   setCentralWidget(centralWidget);
+  QVBoxLayout *mainVLayout = new QVBoxLayout(centralWidget);
+  mainVLayout->setContentsMargins(0, 0, 0, 0);
+  mainVLayout->setSpacing(0);
 
-  // Create main layout
-  QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
-  mainLayout->setContentsMargins(4, 4, 4, 4);
-  mainLayout->setSpacing(4);
+  // Top Area (Splitter: Sources | Monitors)
+  QSplitter *topSplitter = new QSplitter(Qt::Horizontal, this);
+  topSplitter->setStyleSheet("QSplitter::handle { background-color: #111; }");
 
-  // Create splitter
-  QSplitter *splitter = new QSplitter(Qt::Horizontal, this);
+  // Left: Media Pool
+  QWidget *leftContainer = new QWidget(this);
+  QVBoxLayout *leftLayout = new QVBoxLayout(leftContainer);
+  leftLayout->setContentsMargins(0, 0, 0, 0);
+  leftLayout->setSpacing(0);
 
-  // Create source panel (left side)
+  QLabel *poolLabel = new QLabel("   MEDIA POOL / SOURCES", this);
+  poolLabel->setStyleSheet("background-color: #1a1a1a; color: #888; "
+                           "font-weight: bold; font-size: 10px; padding: 4px;");
+  leftLayout->addWidget(poolLabel);
+
   m_sourcePanel = new SourcePanel(this);
-  m_sourcePanel->setMinimumWidth(200);
-  m_sourcePanel->setMaximumWidth(300);
-  splitter->addWidget(m_sourcePanel);
+  leftLayout->addWidget(m_sourcePanel);
 
-  // Create right side container
-  QWidget *rightContainer = new QWidget(this);
-  QVBoxLayout *rightLayout = new QVBoxLayout(rightContainer);
-  rightLayout->setContentsMargins(0, 0, 0, 0);
-  rightLayout->setSpacing(4);
+  topSplitter->addWidget(leftContainer);
+  topSplitter->setStretchFactor(0, 1);
 
-  // Create preview widget
-  m_previewWidget = new PreviewWidget(this);
-  rightLayout->addWidget(m_previewWidget, 1);
+  // Right: Monitors area
+  QWidget *monitorsContainer = new QWidget(this);
+  QVBoxLayout *monitorsLayout = new QVBoxLayout(monitorsContainer);
+  monitorsLayout->setContentsMargins(4, 4, 4, 4);
 
-  // Create control panel
+  QLabel *monitorLabel =
+      new QLabel("Monitor3G - Professional Hardware Console", this);
+  monitorLabel->setAlignment(Qt::AlignCenter);
+  monitorLabel->setStyleSheet(
+      "color: #888; font-size: 11px; font-weight: bold; padding: 4px;");
+  monitorsLayout->addWidget(monitorLabel);
+
+  QHBoxLayout *dualMonitorLayout = new QHBoxLayout();
+
+  // Preview Monitor (Green)
+  QWidget *previewContainer = new QWidget(this);
+  QVBoxLayout *previewLayout = new QVBoxLayout(previewContainer);
+  previewLayout->setContentsMargins(0, 0, 0, 0);
+  previewLayout->setSpacing(0);
+  m_previewMonitor = new PreviewWidget(this);
+  m_previewMonitor->setStyleSheet(
+      "border: 1px solid #333; background-color: black;");
+  QLabel *pvwLabel = new QLabel("PREVIEW", this);
+  pvwLabel->setAlignment(Qt::AlignCenter);
+  pvwLabel->setStyleSheet("background-color: #00aa44; color: white; "
+                          "font-weight: bold; font-size: 10px;");
+  previewLayout->addWidget(m_previewMonitor, 1);
+  previewLayout->addWidget(pvwLabel);
+
+  // Program Monitor (Red)
+  QWidget *programContainer = new QWidget(this);
+  QVBoxLayout *programLayout = new QVBoxLayout(programContainer);
+  programLayout->setContentsMargins(0, 0, 0, 0);
+  programLayout->setSpacing(0);
+  m_programMonitor = new PreviewWidget(this);
+  m_programMonitor->setStyleSheet(
+      "border: 1px solid #333; background-color: black;");
+  QLabel *pgmLabel = new QLabel("PROGRAM", this);
+  pgmLabel->setAlignment(Qt::AlignCenter);
+  pgmLabel->setStyleSheet("background-color: #cc2200; color: white; "
+                          "font-weight: bold; font-size: 10px;");
+  programLayout->addWidget(m_programMonitor, 1);
+  programLayout->addWidget(pgmLabel);
+
+  // Center Buttons (Cut/Auto)
+  QVBoxLayout *centerBtnLayout = new QVBoxLayout();
+  centerBtnLayout->addStretch();
+  m_cutBtn = new QPushButton("CUT", this);
+  m_cutBtn->setMinimumSize(60, 40);
+  m_cutBtn->setStyleSheet("background-color: #444; color: white; border: 1px "
+                          "solid #666; border-radius: 4px; font-weight: bold;");
+
+  m_autoBtn = new QPushButton("AUTO", this);
+  m_autoBtn->setMinimumSize(60, 40);
+  m_autoBtn->setStyleSheet(
+      "background-color: #444; color: white; border: 1px solid #666; "
+      "border-radius: 4px; font-weight: bold;");
+
+  centerBtnLayout->addWidget(m_cutBtn);
+  centerBtnLayout->addWidget(m_autoBtn);
+  centerBtnLayout->addStretch();
+
+  dualMonitorLayout->addWidget(previewContainer, 1);
+  dualMonitorLayout->addLayout(centerBtnLayout, 0);
+  dualMonitorLayout->addWidget(programContainer, 1);
+
+  monitorsLayout->addLayout(dualMonitorLayout);
+
+  // Control Panel at bottom of Monitor area
   m_controlPanel = new ControlPanel(this);
-  m_controlPanel->setMaximumHeight(150);
-  rightLayout->addWidget(m_controlPanel);
+  m_controlPanel->setMaximumHeight(200);
+  monitorsLayout->addWidget(m_controlPanel);
 
-  splitter->addWidget(rightContainer);
+  topSplitter->addWidget(monitorsContainer);
+  topSplitter->setStretchFactor(1, 4);
 
-  // Set splitter proportions
-  splitter->setStretchFactor(0, 0);
-  splitter->setStretchFactor(1, 1);
+  mainVLayout->addWidget(topSplitter, 1); // Expandable upper area
 
-  mainLayout->addWidget(splitter);
+  // Bottom Area: Developer Console
+  m_console = new DeveloperConsole(this);
+  m_console->setMaximumHeight(180);
+  mainVLayout->addWidget(m_console, 0); // Fixed size
+
+  // Wire up Control Panel
+  connect(m_controlPanel, &ControlPanel::startOutputRequested, this,
+          &MainWindow::onOutputStarted);
+  connect(m_controlPanel, &ControlPanel::stopOutputRequested, this,
+          &MainWindow::onOutputStopped);
+  connect(m_controlPanel, &ControlPanel::testPatternRequested, this,
+          &MainWindow::onTestPatternRequest);
 }
 
 void MainWindow::createMenuBar() {
-  // File menu
   QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
-
-  QAction *openAction = fileMenu->addAction(tr("&Open Source..."));
-  openAction->setShortcut(QKeySequence::Open);
-
-  fileMenu->addSeparator();
-
-  QAction *quitAction = fileMenu->addAction(tr("&Quit"));
-  quitAction->setShortcut(QKeySequence::Quit);
-  connect(quitAction, &QAction::triggered, this, &QMainWindow::close);
-
-  // Sources menu
-  QMenu *sourcesMenu = menuBar()->addMenu(tr("&Sources"));
-  sourcesMenu->addAction(tr("Video File..."));
-  sourcesMenu->addAction(tr("Image..."));
-  sourcesMenu->addAction(tr("PDF Document..."));
-  sourcesMenu->addAction(tr("Screen Capture..."));
-  sourcesMenu->addAction(tr("Live Camera..."));
-
-  // Output menu
-  QMenu *outputMenu = menuBar()->addMenu(tr("&Output"));
-  outputMenu->addAction(tr("Device Settings..."));
-  outputMenu->addAction(tr("Format Settings..."));
-  outputMenu->addSeparator();
-  outputMenu->addAction(tr("Start Output"));
-  outputMenu->addAction(tr("Stop Output"));
-
-  // Help menu
-  QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
-  helpMenu->addAction(tr("&About"));
-  helpMenu->addAction(tr("Documentation"));
+  fileMenu->addAction("Quit", this, &QWidget::close);
 }
 
 void MainWindow::createStatusBar() {
-  // Create status bar widgets
-  m_statusLabel = new QLabel(tr("Ready"), this);
-  m_deviceLabel = new QLabel(tr("No Device"), this);
-  m_fpsLabel = new QLabel(tr("0 fps"), this);
+  m_statusLabel = new QLabel("READY", this);
+  m_statusLabel->setStyleSheet("color: #aaa; padding-left: 5px;");
 
-  // Add to status bar
+  m_deviceLabel = new QLabel("DEVICE: UNKNOWN", this);
+  m_deviceLabel->setStyleSheet("color: #888; padding-right: 10px;");
+
+  m_fpsLabel = new QLabel("FPS: 0", this);
+  m_fpsLabel->setStyleSheet("color: #888;");
+
   statusBar()->addWidget(m_statusLabel, 1);
   statusBar()->addPermanentWidget(m_deviceLabel);
   statusBar()->addPermanentWidget(m_fpsLabel);
-
-  LOG_DEBUG("Status bar created");
 }
 
 void MainWindow::updateWindowTitle() {
-  setWindowTitle(tr("Monitor3G - Blackmagic Output Control"));
+  setWindowTitle("Monitor3G - Professional Hardware Console");
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
   LOG_INFO("Application closing");
-
-  // TODO: Check if output is running and confirm
-
   event->accept();
 }
 
-void MainWindow::onDeviceStatusChanged(bool connected) {
-  if (connected) {
-    m_deviceLabel->setText(tr("Device Connected"));
-    m_statusLabel->setText(tr("Ready to output"));
-  } else {
-    m_deviceLabel->setText(tr("No Device"));
-    m_statusLabel->setText(tr("No output device available"));
+void MainWindow::onDeviceStatusChanged(bool connected) {}
+
+void MainWindow::onOutputStarted() {
+  if (m_output) {
+    m_output->start();
   }
 }
 
-void MainWindow::onOutputStarted() {
-  m_statusLabel->setText(tr("● LIVE"));
-  LOG_INFO("Output started");
+void MainWindow::onOutputStopped() {
+  if (m_output) {
+    m_output->stop();
+  }
 }
 
-void MainWindow::onOutputStopped() {
-  m_statusLabel->setText(tr("Ready"));
-  LOG_INFO("Output stopped");
+void MainWindow::onTestPatternRequest(bool active) {
+  if (active) {
+    LOG_INFO("Output source switched to: Test Pattern");
+    if (m_output) {
+      m_output->setSource(m_testPatternSource);
+    }
+  } else {
+    LOG_INFO("Output source restored to: Media Pool Selection");
+    // For now, restoring to nothing if no main source selected.
+    // In future, we restore m_currentMainSource
+    if (m_output) {
+      m_output->setSource(m_currentMainSource);
+    }
+  }
 }
 
 } // namespace Monitor3G
