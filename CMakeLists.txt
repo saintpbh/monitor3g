@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Monitor3G VERSION 1.0.6 LANGUAGES CXX)
+project(Monitor3G VERSION 1.1.1 LANGUAGES CXX)
 
 # C++ Standard
 set(CMAKE_CXX_STANDARD 17)
@@ -14,7 +14,8 @@ set(CMAKE_AUTOUIC ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Multimedia OpenGLWidgets)
+find_package(Qt6 COMPONENTS Core Gui Widgets OpenGLWidgets Network Multimedia
+                            MultimediaWidgets Quick Qml QuickControls2 REQUIRED)
 
 # Find FFmpeg
 find_package(PkgConfig REQUIRED)
@@ -58,9 +59,13 @@ include_directories(
     ${Qt6_OPENGL_INCLUDE_DIRS}
 )
 
+link_directories(${FFMPEG_LIBRARY_DIRS})
+
 # Source files
 set(SOURCES
     src/main.cpp
+    src/main.cpp
+    src/core/AppController.cpp
     src/core/DeckLinkDevice.cpp
     src/core/DeckLinkOutput.cpp
     src/core/DeviceMonitor.cpp
@@ -82,12 +87,16 @@ set(SOURCES
     src/utils/Logger.cpp
     src/utils/ErrorHandler.cpp
     src/ui/DeveloperConsole.cpp
+    src/ui/controllers/VideoController.cpp
+    src/ui/controllers/VideoController.cpp
     libs/decklink-sdk/Mac/include/DeckLinkAPIDispatch.cpp
+    src/ui/qml/VideoItem.cpp
 )
 
 # Header files
 set(HEADERS
     src/core/DeckLinkDevice.h
+    src/core/AppController.h
     src/core/DeckLinkOutput.h
     src/core/DeviceMonitor.h
     src/sources/AbstractSource.h
@@ -109,6 +118,8 @@ set(HEADERS
     src/utils/Logger.h
     src/utils/LogMessenger.h
     src/utils/ErrorHandler.h
+    src/ui/qml/VideoItem.h
+    src/ui/qml/FrameProvider.h
 )
 
 # Create executable
@@ -117,10 +128,9 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 # Link libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
-    Qt6::Widgets
-    Qt6::Gui
-    Qt6::Multimedia
-    Qt6::OpenGLWidgets
+    Qt6::Gui Qt6::Widgets Qt6::OpenGLWidgets Qt6::Network Qt6::Multimedia
+  Qt6::MultimediaWidgets Qt6::Quick Qt6::Qml Qt6::QuickControls2
+  ${FFMPEG_LIBRARIES}
     ${FFMPEG_LIBRARY_DIRS}/libavformat.dylib
     ${FFMPEG_LIBRARY_DIRS}/libavcodec.dylib
     ${FFMPEG_LIBRARY_DIRS}/libswscale.dylib

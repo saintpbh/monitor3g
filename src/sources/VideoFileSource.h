@@ -52,6 +52,8 @@ public:
   void pause();
   void seek(int64_t timestamp);
   bool isPaused() const { return m_isPaused; }
+  void setLoop(bool loop) { m_isLooping = loop; }
+  bool isLooping() const { return m_isLooping; }
   int64_t getDuration() const;
   int64_t getPosition() const;
 
@@ -61,11 +63,14 @@ private:
   QString m_filePath;
   std::atomic<bool> m_isActive;
   std::atomic<bool> m_isPaused;
+  std::atomic<bool> m_isLooping;
+  std::atomic<int64_t> m_positionMs;
 
   // FFmpeg
   AVFormatContext *m_formatCtx = nullptr;
   AVCodecContext *m_codecCtx = nullptr;
   SwsContext *m_swsCtx = nullptr;
+  SwsContext *m_previewSwsCtx = nullptr;
   int m_videoStreamIndex = -1;
 
   // Frame Queue

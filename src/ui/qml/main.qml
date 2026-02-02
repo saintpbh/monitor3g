@@ -1,0 +1,684 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Window
+import Monitor3G 1.0
+
+ApplicationWindow {
+    id: window
+    visible: true
+    width: 1280
+    height: 800
+    title: "Monitor3G Pro"
+    color: "#1e1e1e"
+
+    // Modern Dark Theme Palette
+    Palette {
+        id: darkPalette
+        window: "#1e1e1e"
+        windowText: "#ffffff"
+        base: "#2b2b2b"
+        text: "#ffffff"
+        button: "#444444"
+        buttonText: "#ffffff"
+        highlight: "#007aff"
+        highlightedText: "#ffffff"
+    }
+
+    menuBar: MenuBar {
+        Menu {
+            title: "File"
+            MenuItem {
+                text: "Add Video File..."
+                onTriggered: backend.requestAddFile()
+            }
+            MenuItem {
+                text: "Exit"
+                onTriggered: Qt.quit()
+            }
+        }
+    }
+
+    function formatTime(ms) {
+        var seconds = Math.floor(ms / 1000);
+        var minutes = Math.floor(seconds / 60);
+        var hours = Math.floor(minutes / 60);
+        seconds = seconds % 60;
+        minutes = minutes % 60;
+        
+        var str = "";
+        if (hours > 0) str += (hours < 10 ? "0" + hours : hours) + ":";
+        str += (minutes < 10 ? "0" + minutes : minutes) + ":";
+        str += (seconds < 10 ? "0" + seconds : seconds);
+        return str;
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        // Top Header / Status Bar
+        Rectangle {
+            Layout.fillWidth: true
+            height: 40
+            color: "#252525"
+            // Bottom border line
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: "#333"
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                
+                Label {
+                    text: "MONITOR 3G"
+                    font.bold: true
+                    font.pixelSize: 14
+                    color: "#007aff"
+                }
+                
+                Item { Layout.fillWidth: true }
+                
+                Label {
+                    text: backend.deviceStatus
+                    color: backend.isDeviceConnected ? "#4CAF50" : "#F44336"
+                    font.bold: true
+                }
+            }
+        }
+
+        // Main Content Area
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+
+            // Left: Media Pool (Enhanced with View Options)
+            Rectangle {
+                Layout.preferredWidth: 280
+                Layout.fillHeight: true
+                color: "#1a1a1a"
+                border.color: "#333"
+                border.width: 1
+                
+                // View State
+                property int viewMode: 1  // 0=Name Only, 1=Thumbnail+Name, 2=Thumbnail Only
+                property int itemSize: 80  // Updated by size slider
+                
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 0
+                    
+                    // Header
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 35
+                        color: "#2d2d2d"
+                        
+                        Label {
+                            anchors.centerIn: parent
+                            text: "MEDIA POOL"
+                            font.bold: true
+                            font.pixelSize: 12
+                            color: "#aaa"
+                        }
+                    }
+                    
+                    // Toolbar: View Options
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 50
+                        color: "#252525"
+                        
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 8
+                            
+                            // View Mode Buttons
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 34
+                                color: "transparent"
+                                
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 2
+                                    
+                                    // Name Only
+                                    Button {
+                                        id: viewNameBtn
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        text: "📄"
+                                        font.pixelSize: 16
+                                        property bool active: viewMode === 0
+                                        background: Rectangle {
+                                            color: parent.active ? "#007aff" : (parent.hovered ? "#333" : "#2a2a2a")
+                                            radius: 3
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: "white"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font: parent.font
+                                        }
+                                        onClicked: viewMode = 0
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Name Only"
+                                    }
+                                    
+                                    // Thumbnail + Name
+                                    Button {
+                                        id: viewThumbNameBtn
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        text: "🖼️"
+                                        font.pixelSize: 16
+                                        property bool active: viewMode === 1
+                                        background: Rectangle {
+                                            color: parent.active ? "#007aff" : (parent.hovered ? "#333" : "#2a2a2a")
+                                            radius: 3
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: "white"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font: parent.font
+                                        }
+                                        onClicked: viewMode = 1
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Thumbnail + Name"
+                                    }
+                                    
+                                    // Thumbnail Only
+                                    Button {
+                                        id: viewThumbBtn
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        text: "🎬"
+                                        font.pixelSize: 16
+                                        property bool active: viewMode === 2
+                                        background: Rectangle {
+                                            color: parent.active ? "#007aff" : (parent.hovered ? "#333" : "#2a2a2a")
+                                            radius: 3
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: "white"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font: parent.font
+                                        }
+                                        onClicked: viewMode = 2
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Thumbnail Only"
+                                    }
+                                }
+                            }
+                            
+                            // Size Slider
+                            Rectangle {
+                                Layout.preferredWidth: 80
+                                Layout.fillHeight: true
+                                color: "transparent"
+                                
+                                RowLayout {
+                                    anchors.fill: parent
+                                    spacing: 4
+                                    
+                                    Label {
+                                        text: "🔍"
+                                        font.pixelSize: 12
+                                        color: "#aaa"
+                                    }
+                                    
+                                    Slider {
+                                        id: sizeSlider
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: 2
+                                        value: 1
+                                        stepSize: 1
+                                        snapMode: Slider.SnapAlways
+                                        onValueChanged: {
+                                            // Update parent Rectangle's itemSize: Small=40, Medium=80, Large=120
+                                            var sizes = [40, 80, 120]
+                                            itemSize = sizes[value]
+                                        }
+                                        
+                                        ToolTip {
+                                            parent: sizeSlider.handle
+                                            visible: sizeSlider.pressed
+                                            text: ["Small", "Medium", "Large"][sizeSlider.value]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Media List
+                    ListView {
+                        id: mediaListView
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        model: backend.sourceList
+                        clip: true
+                        spacing: viewMode === 2 ? 8 : 2
+                        
+                        delegate: Rectangle {
+                            width: mediaListView.width - 10
+                            height: viewMode === 0 ? 40 : itemSize
+                            x: 5
+                            color: ListView.isCurrentItem || area.containsMouse ? "#333" : "#252525"
+                            radius: 4
+                            
+                            // Selection Indicator
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 3
+                                color: "#007aff"
+                                radius: 1.5
+                                visible: ListView.isCurrentItem
+                            }
+
+                            MouseArea {
+                                id: area
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    mediaListView.currentIndex = index
+                                    backend.selectSource(index)
+                                }
+                            }
+                            
+                            // Content Layout
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 8
+                                visible: viewMode !== 2
+                                
+                                // Thumbnail (if mode 1)
+                                Rectangle {
+                                    Layout.preferredWidth: itemSize - 16
+                                    Layout.fillHeight: true
+                                    color: "#1a1a1a"
+                                    border.color: "#444"
+                                    border.width: 1
+                                    radius: 3
+                                    visible: viewMode === 1
+                                    
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "🎬"
+                                        font.pixelSize: itemSize / 3
+                                        opacity: 0.3
+                                    }
+                                }
+                                
+                                // Name
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    
+                                    Label {
+                                        text: modelData
+                                        color: "white"
+                                        font.pixelSize: 12
+                                        elide: Text.ElideMiddle
+                                        Layout.fillWidth: true
+                                    }
+                                    
+                                    Label {
+                                        text: "Video File"
+                                        color: "#888"
+                                        font.pixelSize: 10
+                                        visible: viewMode === 1 && itemSize > 60
+                                    }
+                                }
+                            }
+                            
+                            // Thumbnail Only Mode
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                color: "#1a1a1a"
+                                border.color: ListView.isCurrentItem ? "#007aff" : "#444"
+                                border.width: 2
+                                radius: 4
+                                visible: viewMode === 2
+                                
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    spacing: 0
+                                    
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        color: "#0a0a0a"
+                                        
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: "🎬"
+                                            font.pixelSize: parent.height / 2
+                                            opacity: 0.3
+                                        }
+                                    }
+                                    
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 24
+                                        color: "#1a1a1a"
+                                        
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            color: "white"
+                                            font.pixelSize: 9
+                                            elide: Text.ElideMiddle
+                                            width: parent.width - 8
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Bottom: Action Buttons
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 50
+                        color: "#2d2d2d"
+                        
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 8
+                            
+                            Button {
+                                text: "Start Output"
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                onClicked: backend.startOutput()
+                                
+                                background: Rectangle {
+                                    color: parent.down ? "#28a745" : (parent.hovered ? "#34d058" : "#2ea44f")
+                                    radius: 4
+                                }
+                                
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.bold: true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Center: Preview/Program Monitors (Broadcast Style)
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 0
+                
+                // Top: Dual Monitors
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 10
+                    
+                    // Preview Monitor (Green border)
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: "#111"
+                        border.color: "#4CAF50"
+                        border.width: 3
+                        
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 0
+                            
+                            // Label
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 30
+                                color: "#2d2d2d"
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: "PREVIEW"
+                                    color: "#4CAF50"
+                                    font.bold: true
+                                    font.pixelSize: 14
+                                }
+                            }
+                            
+                            // Video display
+                            VideoItem {
+                                id: previewVideo
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                
+                                Component.onCompleted: {
+                                    FrameProvider.previewFrameReceived.connect(previewVideo.updateFrame);
+                                }
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "NO PREVIEW"
+                                    color: "#555"
+                                    font.pixelSize: 20
+                                    visible: !previewVideo.hasFrame
+                                }
+                                }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Program Monitor (Red border)
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: "#111"
+                        border.color: "#F44336"
+                        border.width: 3
+                        
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 0
+                            
+                            // Label
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 30
+                                color: "#2d2d2d"
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: "PROGRAM (OUTPUT)"
+                                    color: "#F44336"
+                                    font.bold: true
+                                    font.pixelSize: 14
+                                }
+                            }
+                            
+                            // Video display
+                            VideoItem {
+                                id: programVideo
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                
+                                Component.onCompleted: {
+                                    FrameProvider.programFrameReceived.connect(programVideo.updateFrame);
+                                }
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "NO PROGRAM"
+                                    color: "#555"
+                                    font.pixelSize: 20
+                                    visible: !programVideo.hasFrame
+                                }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Transition Control Bar
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 60
+                    color: "#1a1a1a"
+                    
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 20
+                        
+                        Item { Layout.fillWidth: true }
+                        
+                        // CUT button (instant transition)
+                        Button {
+                            text: "CUT"
+                            font.bold: true
+                            font.pixelSize: 16
+                            Layout.preferredWidth: 100
+                            Layout.preferredHeight: 40
+                            background: Rectangle {
+                                color: parent.down ? "#d32f2f" : "#F44336"
+                                radius: 4
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                font: parent.font
+                            }
+                            onClicked: {
+                                backend.takePreview()
+                            }
+                        }
+                        
+                        Label {
+                            text: "TRANSITION"
+                            color: "#888"
+                            font.pixelSize: 12
+                        }
+                        
+                        // AUTO button (future: fade transition)
+                        Button {
+                            text: "AUTO"
+                            enabled: false
+                            Layout.preferredWidth: 100
+                            Layout.preferredHeight: 40
+                            opacity: 0.5
+                        }
+                        
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+        
+        // Transport Bar
+        Rectangle {
+            Layout.fillWidth: true
+            height: 80
+            color: "#252525"
+            // Top border line
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 1
+                color: "#333"
+            }
+            
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 5
+                
+                // Slider Row
+                RowLayout {
+                    Layout.fillWidth: true
+                    
+                    Label {
+                        text: formatTime(backend.position)
+                        color: "#aaa"
+                        font.pixelSize: 12
+                    }
+                    
+                    Slider {
+                        Layout.fillWidth: true
+                        from: 0
+                        to: backend.duration > 0 ? backend.duration : 1
+                        value: backend.position
+                        enabled: backend.duration > 0
+                        
+                        onMoved: {
+                             if (backend.duration > 0) {
+                                 backend.seek(value)
+                             }
+                        }
+                    }
+                    
+                    Label {
+                        text: formatTime(backend.duration)
+                        color: "#aaa"
+                        font.pixelSize: 12
+                    }
+                }
+                
+                // Controls Row
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 20
+                    
+                    Button {
+                        text: "First" // Seek to start
+                        onClicked: backend.seek(0)
+                        enabled: backend.sourceType === 1
+                    }
+                    
+                    Button {
+                        text: backend.isPlaying ? "PAUSE" : "PLAY"
+                        font.bold: true
+                        background: Rectangle {
+                            color: parent.down ? "#005ecb" : "#007aff"
+                            radius: 4
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: backend.isPlaying ? backend.pause() : backend.play()
+                        enabled: backend.sourceType === 1 // Video
+                    }
+                    
+                    Button {
+                        text: "Loop: " + (backend.isLooping ? "ON" : "OFF") // Need property
+                        visible: false // TODO: Implementing loop later
+                    }
+                }
+            }
+        }
+    }

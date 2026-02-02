@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QLabel>
+#include <QList>
 #include <QMainWindow>
 #include <QPushButton>
 #include <memory>
@@ -16,6 +17,7 @@ class DeckLinkOutput;
 class TestPatternSource;
 class AbstractSource;
 class DeveloperConsole;
+class VideoController;
 
 class MainWindow : public QMainWindow {
   Q_OBJECT
@@ -32,6 +34,8 @@ private slots:
   void onOutputStarted();
   void onOutputStopped();
   void onTestPatternRequest(bool active);
+  void onSourceAdded(const QString &type, const QString &path);
+  void onSourceSelected(int index);
 
 private:
   void setupUI();
@@ -43,6 +47,7 @@ private:
   SourcePanel *m_sourcePanel;
   ControlPanel *m_controlPanel;
   DeveloperConsole *m_console;
+  VideoController *m_videoController;
 
   // Monitors
   PreviewWidget *m_previewMonitor; // Left
@@ -62,6 +67,7 @@ private:
   DeckLinkOutput *m_output;
   TestPatternSource *m_testPatternSource;
   AbstractSource *m_currentMainSource; // Track selected media source
+  QList<AbstractSource *> m_sources;
 };
 
 } // namespace Monitor3G

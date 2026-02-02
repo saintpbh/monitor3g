@@ -24,6 +24,8 @@ signals:
   void playRequested();
   void pauseRequested();
   void stopRequested();
+  void rewindRequested();
+  void fastForwardRequested();
   void seekRequested(int64_t positionMs);
   void loopChanged(bool enabled);
 
@@ -38,6 +40,8 @@ private:
 
   QPushButton *m_playPauseBtn;
   QPushButton *m_stopBtn;
+  QPushButton *m_rewindBtn;
+  QPushButton *m_fastForwardBtn;
   QSlider *m_seekSlider;
   QLabel *m_timeLabel; // "00:00 / 00:00"
   QCheckBox *m_loopCheck;

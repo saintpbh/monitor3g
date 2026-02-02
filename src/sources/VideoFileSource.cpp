@@ -1,12 +1,13 @@
 #include "VideoFileSource.h"
 #include "../utils/Logger.h"
+#include <QMutexLocker>
 #include <QPainter>
 
 namespace Monitor3G {
 
 VideoFileSource::VideoFileSource(QObject *parent)
     : AbstractSource(parent), m_isActive(false), m_isPaused(false),
-      m_stopDecode(false) {}
+      m_stopDecode(false), m_isLooping(false), m_positionMs(0) {}
 
 VideoFileSource::~VideoFileSource() {
   stop();
@@ -172,27 +173,68 @@ void VideoFileSource::decodeLoop() {
               QMutexLocker locker(&m_queueMutex);
               m_frameQueue.push(vFrame);
 
-              // Update preview occasionaly
-              if (m_frameQueue.size() % 5 == 0) {
+              // Update preview (every frame or throttle)
+              // For smoother preview, let's try every frame or every 2nd frame
+              if (m_frameQueue.size() % 2 == 0) {
                 QMutexLocker pLock(&m_previewMutex);
-                // Very basic UYVY to RGB for preview
-                // In real app we might use SwsContext again or shader
-                // For now, simple box or just logic
+
+                int previewWidth = 960;
+                int previewHeight = 540;
+
+                if (m_currentPreview.isNull() ||
+                    m_currentPreview.width() != previewWidth) {
+                  m_currentPreview = QImage(previewWidth, previewHeight,
+                                            QImage::Format_ARGB32);
+                }
+
+                if (!m_previewSwsCtx) {
+                  m_previewSwsCtx = sws_getContext(
+                      frame->width, frame->height, m_codecCtx->pix_fmt,
+                      previewWidth, previewHeight,
+                      AV_PIX_FMT_BGRA, // Qt uses BGRA/ARGB
+                      SWS_BILINEAR, nullptr, nullptr, nullptr);
+                }
+
+                if (m_previewSwsCtx) {
+                  uint8_t *destData[4] = {(uint8_t *)m_currentPreview.bits(),
+                                          nullptr, nullptr, nullptr};
+                  int destLinesize[4] = {(int)m_currentPreview.bytesPerLine(),
+                                         0, 0, 0};
+
+                  sws_scale(m_previewSwsCtx, frame->data, frame->linesize, 0,
+                            frame->height, destData, destLinesize);
+                }
               }
             }
           }
         }
+
+        // Update position in atomic variable
+        if (m_formatCtx && m_formatCtx->streams[m_videoStreamIndex]) {
+          AVRational tb = m_formatCtx->streams[m_videoStreamIndex]->time_base;
+          m_positionMs = av_rescale_q(frame->pts, tb, {1, 1000});
+        }
       }
       av_packet_unref(packet);
     } else {
-      // EOF, loop
-      av_seek_frame(m_formatCtx, m_videoStreamIndex, 0, AVSEEK_FLAG_BACKWARD);
+      // EOF handling
+      if (m_isLooping) {
+        av_seek_frame(m_formatCtx, m_videoStreamIndex, 0, AVSEEK_FLAG_BACKWARD);
+      } else {
+        m_isPaused = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
     }
   }
 
   av_frame_free(&outputFrame);
   av_frame_free(&frame);
   av_packet_free(&packet);
+
+  if (m_previewSwsCtx) {
+    sws_freeContext(m_previewSwsCtx);
+    m_previewSwsCtx = nullptr;
+  }
 }
 
 bool VideoFileSource::fillNextFrame(IDeckLinkMutableVideoFrame *frame) {
@@ -233,27 +275,43 @@ bool VideoFileSource::fillNextFrame(IDeckLinkMutableVideoFrame *frame) {
 }
 
 void VideoFileSource::fillQImage(QImage &image) {
-  // Basic preview fallback (green box to show it's active)
-  QPainter p(&image);
-  p.fillRect(image.rect(), Qt::black);
-  p.setPen(Qt::white);
-  p.drawText(image.rect(), Qt::AlignCenter,
-             "Video Playing\n(Preview optimize pending)");
-
-  // In full implementation we would convert UYVY to RGB
-  // But for reconstruction speed, placeholder is fine
+  QMutexLocker pLock(&m_previewMutex);
+  if (!m_currentPreview.isNull()) {
+    // Scale if necessary, but MainWindow usually handles aspect ratio
+    // Just copy the internal preview buffer
+    image = m_currentPreview.copy();
+  } else {
+    // Fallback
+    QPainter p(&image);
+    p.fillRect(image.rect(), Qt::black);
+    p.setPen(Qt::white);
+    p.drawText(image.rect(), Qt::AlignCenter, "No Preview Available");
+  }
 }
 
 void VideoFileSource::play() { m_isPaused = false; }
 void VideoFileSource::pause() { m_isPaused = true; }
-void VideoFileSource::seek(int64_t timestamp) {
-  // Implement seek
+void VideoFileSource::seek(int64_t timestampMs) {
+  if (!m_formatCtx)
+    return;
+  // Convert ms to stream time base
+  int64_t targetTs = av_rescale(
+      timestampMs, m_formatCtx->streams[m_videoStreamIndex]->time_base.den,
+      m_formatCtx->streams[m_videoStreamIndex]->time_base.num * 1000);
+  av_seek_frame(m_formatCtx, m_videoStreamIndex, targetTs,
+                AVSEEK_FLAG_BACKWARD);
+
+  // Clear queue to prevent old frames from showing
+  QMutexLocker locker(&m_queueMutex);
+  std::queue<VideoFrame> empty;
+  std::swap(m_frameQueue, empty);
 }
 int64_t VideoFileSource::getDuration() const {
   if (m_formatCtx)
-    return m_formatCtx->duration;
+    // Duration is in AV_TIME_BASE (microseconds), convert to ms
+    return m_formatCtx->duration / 1000;
   return 0;
 }
-int64_t VideoFileSource::getPosition() const { return 0; }
+int64_t VideoFileSource::getPosition() const { return m_positionMs; }
 
 } // namespace Monitor3G

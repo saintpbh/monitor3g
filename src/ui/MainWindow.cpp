@@ -2,28 +2,33 @@
 #include "../core/DeckLinkDevice.h"
 #include "../core/DeckLinkOutput.h"
 #include "../sources/TestPatternSource.h"
+#include "../sources/VideoFileSource.h"
 #include "../utils/Logger.h"
 #include "ControlPanel.h"
 #include "DeveloperConsole.h"
 #include "PreviewWidget.h"
 #include "SourcePanel.h"
+#include "controllers/VideoController.h"
 
 #include <QAction>
 #include <QCloseEvent>
 #include <QHBoxLayout>
+#include <QImage>
+#include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace Monitor3G {
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_sourcePanel(nullptr), m_controlPanel(nullptr),
-      m_console(nullptr), m_previewMonitor(nullptr), m_programMonitor(nullptr),
-      m_output(nullptr), m_testPatternSource(nullptr),
-      m_currentMainSource(nullptr) {
+      m_console(nullptr), m_videoController(nullptr), m_previewMonitor(nullptr),
+      m_programMonitor(nullptr), m_output(nullptr),
+      m_testPatternSource(nullptr), m_currentMainSource(nullptr) {
 
   // Dark Theme
   setStyleSheet("QMainWindow { background-color: #2b2b2b; color: #e0e0e0; }");
@@ -55,14 +60,34 @@ MainWindow::MainWindow(QWidget *parent)
     LOG_WARNING("No DeckLink device found. Running in Simulation Mode.");
     m_deviceLabel->setText("DEVICE: SIMULATION");
     m_deviceLabel->setStyleSheet("color: #ffff00;"); // Yellow for Sim
-    m_deviceLabel->setStyleSheet("color: #ffff00;"); // Yellow for Sim
   }
 
   // Monitor Connections
-  connect(m_output, &DeckLinkOutput::videoFrameArrived, m_previewMonitor,
-          &PreviewWidget::setFrame);
+  // Program Monitor (Right) - Shows actual SDI Output
   connect(m_output, &DeckLinkOutput::videoFrameArrived, m_programMonitor,
           &PreviewWidget::setFrame);
+
+  // Preview Loop & UI Timer
+  QTimer *uiTimer = new QTimer(this);
+  connect(uiTimer, &QTimer::timeout, this, [this]() {
+    // 1. Update Preview Monitor (Left) - Shows Video Player / Selected Source
+    if (m_currentMainSource) {
+      QImage previewFrame;
+      m_currentMainSource->fillQImage(previewFrame);
+      if (!previewFrame.isNull()) {
+        m_previewMonitor->setFrame(previewFrame);
+      }
+    }
+
+    // 2. Update Video Controller Timecode
+    if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource)) {
+      if (m_videoController) {
+        m_videoController->updateTime(vs->getPosition(), vs->getDuration());
+        // Sync play state if needed, or rely on signals
+      }
+    }
+  });
+  uiTimer->start(33); // ~30 FPS UI Update
 
   LOG_INFO("MainWindow initialized - Hardware Console Mode");
 }
@@ -105,6 +130,12 @@ void MainWindow::setupUI() {
   m_sourcePanel = new SourcePanel(this);
   leftLayout->addWidget(m_sourcePanel);
 
+  // Connect SourcePanel
+  connect(m_sourcePanel, &SourcePanel::sourceAdded, this,
+          &MainWindow::onSourceAdded);
+  connect(m_sourcePanel, &SourcePanel::sourceSelected, this,
+          &MainWindow::onSourceSelected);
+
   topSplitter->addWidget(leftContainer);
   topSplitter->setStretchFactor(0, 1);
 
@@ -130,7 +161,7 @@ void MainWindow::setupUI() {
   m_previewMonitor = new PreviewWidget(this);
   m_previewMonitor->setStyleSheet(
       "border: 1px solid #333; background-color: black;");
-  QLabel *pvwLabel = new QLabel("PREVIEW", this);
+  QLabel *pvwLabel = new QLabel("PREVIEW (SELECTED SOURCE)", this);
   pvwLabel->setAlignment(Qt::AlignCenter);
   pvwLabel->setStyleSheet("background-color: #00aa44; color: white; "
                           "font-weight: bold; font-size: 10px;");
@@ -145,7 +176,7 @@ void MainWindow::setupUI() {
   m_programMonitor = new PreviewWidget(this);
   m_programMonitor->setStyleSheet(
       "border: 1px solid #333; background-color: black;");
-  QLabel *pgmLabel = new QLabel("PROGRAM", this);
+  QLabel *pgmLabel = new QLabel("PROGRAM (OUTPUT)", this);
   pgmLabel->setAlignment(Qt::AlignCenter);
   pgmLabel->setStyleSheet("background-color: #cc2200; color: white; "
                           "font-weight: bold; font-size: 10px;");
@@ -175,6 +206,40 @@ void MainWindow::setupUI() {
   dualMonitorLayout->addWidget(programContainer, 1);
 
   monitorsLayout->addLayout(dualMonitorLayout);
+
+  // Video Controller (Always Visible)
+  m_videoController = new VideoController(this);
+  m_videoController->setEnabled(false); // Disabled until video source selected
+  monitorsLayout->addWidget(m_videoController);
+
+  // Connect Video Controller signals
+  connect(m_videoController, &VideoController::playRequested, this, [this]() {
+    if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource))
+      vs->play();
+  });
+  connect(m_videoController, &VideoController::pauseRequested, this, [this]() {
+    if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource))
+      vs->pause();
+  });
+  connect(m_videoController, &VideoController::seekRequested, this,
+          [this](int64_t ms) {
+            if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource))
+              vs->seek(ms);
+          });
+  connect(m_videoController, &VideoController::loopChanged, this,
+          [this](bool loop) {
+            if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource))
+              vs->setLoop(loop);
+          });
+  connect(m_videoController, &VideoController::rewindRequested, this, [this]() {
+    if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource))
+      vs->seek(vs->getPosition() - 5000);
+  });
+  connect(m_videoController, &VideoController::fastForwardRequested, this,
+          [this]() {
+            if (auto vs = qobject_cast<VideoFileSource *>(m_currentMainSource))
+              vs->seek(vs->getPosition() + 5000);
+          });
 
   // Control Panel at bottom of Monitor area
   m_controlPanel = new ControlPanel(this);
@@ -234,12 +299,16 @@ void MainWindow::onDeviceStatusChanged(bool connected) {}
 void MainWindow::onOutputStarted() {
   if (m_output) {
     m_output->start();
+    if (m_currentMainSource)
+      m_currentMainSource->start();
   }
 }
 
 void MainWindow::onOutputStopped() {
   if (m_output) {
     m_output->stop();
+    if (m_currentMainSource)
+      m_currentMainSource->stop();
   }
 }
 
@@ -251,11 +320,69 @@ void MainWindow::onTestPatternRequest(bool active) {
     }
   } else {
     LOG_INFO("Output source restored to: Media Pool Selection");
-    // For now, restoring to nothing if no main source selected.
-    // In future, we restore m_currentMainSource
-    if (m_output) {
+    if (m_output && m_currentMainSource) {
       m_output->setSource(m_currentMainSource);
     }
+  }
+}
+
+void MainWindow::onSourceAdded(const QString &path, const QString &type) {
+  if (type == "video") {
+    VideoFileSource *source = new VideoFileSource(this);
+    if (source->openFile(path)) {
+      m_sources.append(source);
+      LOG_INFO("Added Video Source: " + path);
+    } else {
+      LOG_ERROR("Failed to open video source: " + path);
+      source->deleteLater();
+    }
+  } else {
+    // Handle other types or Add placeholders
+    LOG_INFO("Added non-video source: " + path);
+    m_sources.append(nullptr); // Keep alignment with SourcePanel
+  }
+}
+
+void MainWindow::onSourceSelected(int index) {
+  if (index < 0 || index >= m_sources.size())
+    return;
+
+  AbstractSource *source = m_sources[index];
+  if (!source) {
+    LOG_WARNING("Source selected is null or not implemented");
+    return;
+  }
+
+  if (m_currentMainSource != source) {
+    // Stop previous if needed? No, keeping sources ready is better.
+    // But maybe pause video if switching away?
+    // For now, let's keep it simple.
+    m_currentMainSource = source;
+    m_output->setSource(source);
+
+    // Update Video Controller
+    VideoFileSource *vSource = qobject_cast<VideoFileSource *>(source);
+    if (vSource) {
+      // Start decoding immediately for preview
+      vSource->start();
+
+      // Auto-pause if we want to cue it up, or let it run if that's default.
+      // Usually cuing up means pause at start.
+      if (!vSource->isActive()) { // First time start logic if needed
+      }
+
+      m_videoController->setEnabled(true);
+      m_videoController->setPlaying(!vSource->isPaused());
+      if (vSource->isPaused()) {
+        // If was previously paused, keep it paused or play?
+        // Let's force play if it was stopped.
+        vSource->play();
+      }
+    } else {
+      m_videoController->setEnabled(false);
+    }
+
+    LOG_INFO("Switched Main Source to: " + source->getName());
   }
 }
 

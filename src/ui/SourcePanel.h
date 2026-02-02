@@ -1,7 +1,10 @@
 #ifndef SOURCEPANEL_H
 #define SOURCEPANEL_H
 
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QListWidget>
+#include <QMimeData>
 #include <QPushButton>
 #include <QWidget>
 
@@ -15,6 +18,11 @@ public:
 
 signals:
   void sourceSelected(int sourceIndex);
+  void sourceAdded(const QString &path, const QString &type);
+
+protected:
+  void dragEnterEvent(QDragEnterEvent *event) override;
+  void dropEvent(QDropEvent *event) override;
 
 private slots:
   void onAddVideoClicked();
