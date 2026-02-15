@@ -1,0 +1,157 @@
+
+        QMainWindow {
+            background-color: #f0f0f0;
+            color: #333333;
+        }
+        
+        QWidget {
+            background-color: #ffffff;
+            color: #333333;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        /* Splitter */
+        QSplitter::handle {
+            background-color: #cccccc;
+        }
+        QSplitter::handle:hover {
+            background-color: #bbbbbb;
+        }
+
+        /* Buttons */
+        QPushButton {
+            background-color: #007aff;
+            border: 1px solid #007aff;
+            border-radius: 8px;
+            padding: 8px 16px;
+            color: white;
+            font-weight: 500;
+        }
+        QPushButton:hover {
+            background-color: #005ecb;
+            border-color: #005ecb;
+        }
+        QPushButton:pressed {
+            background-color: #004a9e;
+            border-color: #004a9e;
+        }
+        QPushButton:disabled {
+            background-color: #e0e0e0;
+            color: #9e9e9e;
+            border-color: #e0e0e0;
+        }
+
+        /* Labels */
+        QLabel {
+            color: #333333;
+        }
+
+        /* Lists and Trees */
+        QListWidget {
+            background-color: #ffffff;
+            border: 1px solid #cccccc;
+            border-radius: 8px;
+            color: #333333;
+        }
+        QListWidget::item {
+            padding: 8px;
+        }
+        QListWidget::item:selected {
+            background-color: #007aff; /* Accent Color */
+            color: white;
+        }
+        QListWidget::item:hover {
+            background-color: #f0f0f0;
+        }
+
+        /* Combo Box */
+        QComboBox {
+            background-color: #ffffff;
+            border: 1px solid #cccccc;
+            border-radius: 8px;
+            padding: 6px;
+            color: #333333;
+        }
+        QComboBox:hover {
+            border-color: #bbbbbb;
+        }
+        QComboBox::drop-down {
+            border: none;
+        }
+
+        /* Scrollbars */
+        QScrollBar:vertical {
+            background: #f0f0f0;
+            width: 12px;
+            margin: 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #cccccc;
+            min-height: 24px;
+            border-radius: 6px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #bbbbbb;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            background: none;
+        }
+
+        /* Slider */
+        QSlider::groove:horizontal {
+            border: 1px solid #cccccc;
+            height: 6px;
+            background: #e0e0e0;
+            margin: 2px 0;
+            border-radius: 3px;
+        }
+        QSlider::handle:horizontal {
+            background: #007aff;
+            border: 1px solid #007aff;
+            width: 16px;
+            height: 16px;
+            margin: -5px 0;
+            border-radius: 8px;
+        }
+        QSlider::handle:horizontal:hover {
+            background: #005ecb;
+        }
+        
+        /* Tally Colors handled in code but defaults here */
+        .preview-tally { border: 3px solid #4CAF50; }
+        .program-tally { border: 3px solid #F44336; }
+
+#previewLabel {
+    background-color: #00aa44;
+    color: white;
+    font-weight: bold;
+    font-size: 10px;
+    padding: 2px;
+    border-radius: 2px;
+}
+
+#programLabel {
+    background-color: #cc2200;
+    color: white;
+    font-weight: bold;
+    font-size: 10px;
+    padding: 2px;
+    border-radius: 2px;
+}
+
+#poolLabel {
+    background-color: #f0f0f0;
+    color: #888;
+    font-weight: bold;
+    font-size: 10px;
+    padding: 4px;
+}
+
+#monitorLabel {
+    color: #888;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 4px;
+}
+    

@@ -64,7 +64,7 @@ link_directories(${FFMPEG_LIBRARY_DIRS})
 # Source files
 set(SOURCES
     src/main.cpp
-    src/main.cpp
+    src/resources.qrc
     src/core/AppController.cpp
     src/core/DeckLinkDevice.cpp
     src/core/DeckLinkOutput.cpp
@@ -84,10 +84,10 @@ set(SOURCES
     src/ui/PreviewWidget.cpp
     src/ui/ControlPanel.cpp
     src/ui/PDFNavigator.cpp
+    src/ui/Style.cpp
     src/utils/Logger.cpp
     src/utils/ErrorHandler.cpp
     src/ui/DeveloperConsole.cpp
-    src/ui/controllers/VideoController.cpp
     src/ui/controllers/VideoController.cpp
     libs/decklink-sdk/Mac/include/DeckLinkAPIDispatch.cpp
     src/ui/qml/VideoItem.cpp

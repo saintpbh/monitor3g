@@ -1,16 +1,18 @@
 #include "MainWindow.h"
+#include "ControlPanel.h"
+#include "DeveloperConsole.h"
+#include "PreviewWidget.h"
+#include "SourcePanel.h"
+#include "Style.h"
+#include "controllers/VideoController.h"
 #include "../core/DeckLinkDevice.h"
 #include "../core/DeckLinkOutput.h"
 #include "../sources/TestPatternSource.h"
 #include "../sources/VideoFileSource.h"
 #include "../utils/Logger.h"
-#include "ControlPanel.h"
-#include "DeveloperConsole.h"
-#include "PreviewWidget.h"
-#include "SourcePanel.h"
-#include "controllers/VideoController.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QImage>
@@ -30,8 +32,7 @@ MainWindow::MainWindow(QWidget *parent)
       m_programMonitor(nullptr), m_output(nullptr),
       m_testPatternSource(nullptr), m_currentMainSource(nullptr) {
 
-  // Dark Theme
-  setStyleSheet("QMainWindow { background-color: #2b2b2b; color: #e0e0e0; }");
+  qApp->setStyleSheet(Style::getDarkTheme());
 
   setupUI();
   createMenuBar();
@@ -114,7 +115,7 @@ void MainWindow::setupUI() {
 
   // Top Area (Splitter: Sources | Monitors)
   QSplitter *topSplitter = new QSplitter(Qt::Horizontal, this);
-  topSplitter->setStyleSheet("QSplitter::handle { background-color: #111; }");
+
 
   // Left: Media Pool
   QWidget *leftContainer = new QWidget(this);
@@ -123,8 +124,8 @@ void MainWindow::setupUI() {
   leftLayout->setSpacing(0);
 
   QLabel *poolLabel = new QLabel("   MEDIA POOL / SOURCES", this);
-  poolLabel->setStyleSheet("background-color: #1a1a1a; color: #888; "
-                           "font-weight: bold; font-size: 10px; padding: 4px;");
+  poolLabel->setObjectName("poolLabel");
+
   leftLayout->addWidget(poolLabel);
 
   m_sourcePanel = new SourcePanel(this);
@@ -146,9 +147,9 @@ void MainWindow::setupUI() {
 
   QLabel *monitorLabel =
       new QLabel("Monitor3G - Professional Hardware Console", this);
+  monitorLabel->setObjectName("monitorLabel");
   monitorLabel->setAlignment(Qt::AlignCenter);
-  monitorLabel->setStyleSheet(
-      "color: #888; font-size: 11px; font-weight: bold; padding: 4px;");
+
   monitorsLayout->addWidget(monitorLabel);
 
   QHBoxLayout *dualMonitorLayout = new QHBoxLayout();
@@ -159,12 +160,10 @@ void MainWindow::setupUI() {
   previewLayout->setContentsMargins(0, 0, 0, 0);
   previewLayout->setSpacing(0);
   m_previewMonitor = new PreviewWidget(this);
-  m_previewMonitor->setStyleSheet(
-      "border: 1px solid #333; background-color: black;");
+
   QLabel *pvwLabel = new QLabel("PREVIEW (SELECTED SOURCE)", this);
   pvwLabel->setAlignment(Qt::AlignCenter);
-  pvwLabel->setStyleSheet("background-color: #00aa44; color: white; "
-                          "font-weight: bold; font-size: 10px;");
+  pvwLabel->setObjectName("previewLabel");
   previewLayout->addWidget(m_previewMonitor, 1);
   previewLayout->addWidget(pvwLabel);
 
@@ -174,12 +173,10 @@ void MainWindow::setupUI() {
   programLayout->setContentsMargins(0, 0, 0, 0);
   programLayout->setSpacing(0);
   m_programMonitor = new PreviewWidget(this);
-  m_programMonitor->setStyleSheet(
-      "border: 1px solid #333; background-color: black;");
+
   QLabel *pgmLabel = new QLabel("PROGRAM (OUTPUT)", this);
   pgmLabel->setAlignment(Qt::AlignCenter);
-  pgmLabel->setStyleSheet("background-color: #cc2200; color: white; "
-                          "font-weight: bold; font-size: 10px;");
+  pgmLabel->setObjectName("programLabel");
   programLayout->addWidget(m_programMonitor, 1);
   programLayout->addWidget(pgmLabel);
 
@@ -188,14 +185,11 @@ void MainWindow::setupUI() {
   centerBtnLayout->addStretch();
   m_cutBtn = new QPushButton("CUT", this);
   m_cutBtn->setMinimumSize(60, 40);
-  m_cutBtn->setStyleSheet("background-color: #444; color: white; border: 1px "
-                          "solid #666; border-radius: 4px; font-weight: bold;");
+
 
   m_autoBtn = new QPushButton("AUTO", this);
   m_autoBtn->setMinimumSize(60, 40);
-  m_autoBtn->setStyleSheet(
-      "background-color: #444; color: white; border: 1px solid #666; "
-      "border-radius: 4px; font-weight: bold;");
+
 
   centerBtnLayout->addWidget(m_cutBtn);
   centerBtnLayout->addWidget(m_autoBtn);
@@ -272,13 +266,13 @@ void MainWindow::createMenuBar() {
 
 void MainWindow::createStatusBar() {
   m_statusLabel = new QLabel("READY", this);
-  m_statusLabel->setStyleSheet("color: #aaa; padding-left: 5px;");
+
 
   m_deviceLabel = new QLabel("DEVICE: UNKNOWN", this);
-  m_deviceLabel->setStyleSheet("color: #888; padding-right: 10px;");
+
 
   m_fpsLabel = new QLabel("FPS: 0", this);
-  m_fpsLabel->setStyleSheet("color: #888;");
+
 
   statusBar()->addWidget(m_statusLabel, 1);
   statusBar()->addPermanentWidget(m_deviceLabel);
