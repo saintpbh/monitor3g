@@ -1,0 +1,231 @@
+import {
+    Button,
+    VerticalBox,
+    HorizontalBox,
+    ComboBox,
+} from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "LuminaTV Monitor";
+    width: 960px;
+    height: 740px;
+    background: #1a1a2e;
+
+    // Callbacks
+    callback select-source-type(string);
+    callback select-device(int);
+    callback toggle-output(string, bool);
+    callback refresh-sources();
+    callback select-input-resolution(int);
+    callback select-output-resolution(int);
+
+    // Properties
+    in-out property <string> source-name: "No Source";
+    in-out property <string> source-details: "";
+    in-out property <image> preview-image;
+    in-out property <[string]> source-type-list: ["Screen", "Window", "Camera", "NDI"];
+    in-out property <[string]> device-list: [];
+    in-out property <[string]> resolution-list: [
+        "4K UHD (3840x2160)",
+        "QHD (2560x1440)",
+        "Full HD (1920x1080)",
+        "HD (1280x720)",
+        "SD (640x480)",
+        "Native"
+    ];
+
+    VerticalBox {
+        padding: 12px;
+        spacing: 8px;
+
+        // Header
+        Text {
+            text: "LuminaTV Monitor";
+            font-size: 20px;
+            font-weight: 700;
+            color: #e0e0ff;
+            horizontal-alignment: center;
+        }
+
+        // Preview area
+        Rectangle {
+            background: #000000;
+            border-color: #333355;
+            border-width: 2px;
+            border-radius: 8px;
+            min-height: 360px;
+
+            Image {
+                source: root.preview-image;
+                width: parent.width - 4px;
+                height: parent.height - 4px;
+                image-fit: contain;
+            }
+
+            if root.preview-image.width == 0: Text {
+                text: "NO SIGNAL";
+                color: #333355;
+                font-size: 48px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Controls
+        HorizontalBox {
+            spacing: 10px;
+
+            // Source Selection
+            VerticalBox {
+                alignment: start;
+                spacing: 3px;
+
+                Text {
+                    text: "Source Type";
+                    color: #8888aa;
+                    font-size: 11px;
+                }
+
+                ComboBox {
+                    model: root.source-type-list;
+                    current-value: "Screen";
+                    selected(val) => {
+                        root.select-source-type(val);
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 4px;
+                    Text {
+                        text: "Device";
+                        color: #8888aa;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        text: "↻";
+                        clicked => {
+                            root.refresh-sources();
+                        }
+                    }
+                }
+
+                ComboBox {
+                    model: root.device-list;
+                    selected(val) => {
+                        root.select-device(self.current-index);
+                    }
+                }
+            }
+
+            // Resolution Selection
+            VerticalBox {
+                alignment: start;
+                spacing: 3px;
+
+                Text {
+                    text: "Input Resolution";
+                    color: #8888aa;
+                    font-size: 11px;
+                }
+
+                ComboBox {
+                    model: root.resolution-list;
+                    current-index: 2;
+                    current-value: "Full HD (1920x1080)";
+                    selected(val) => {
+                        root.select-input-resolution(self.current-index);
+                    }
+                }
+
+                Text {
+                    text: "Output Resolution";
+                    color: #8888aa;
+                    font-size: 11px;
+                }
+
+                ComboBox {
+                    model: root.resolution-list;
+                    current-index: 2;
+                    current-value: "Full HD (1920x1080)";
+                    selected(val) => {
+                        root.select-output-resolution(self.current-index);
+                    }
+                }
+            }
+
+            // Info + Output Controls
+            VerticalBox {
+                alignment: start;
+                spacing: 3px;
+
+                Text {
+                    text: root.source-name;
+                    color: #ccccee;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+
+                Text {
+                    text: root.source-details;
+                    color: #7777aa;
+                    font-size: 10px;
+                }
+
+                Text {
+                    text: "Outputs";
+                    color: #8888aa;
+                    font-size: 11px;
+                }
+
+                HorizontalBox {
+                    spacing: 6px;
+                    Text {
+                        text: "NDI";
+                        color: #ccccee;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        text: "OFF";
+                        clicked => {
+                            if (self.text == "OFF") {
+                                self.text = "ON";
+                                root.toggle-output("NDI", true);
+                            } else {
+                                self.text = "OFF";
+                                root.toggle-output("NDI", false);
+                            }
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 6px;
+                    Text {
+                        text: "DeckLink";
+                        color: #ccccee;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        text: "OFF";
+                        clicked => {
+                            if (self.text == "OFF") {
+                                self.text = "ON";
+                                root.toggle-output("DeckLink", true);
+                            } else {
+                                self.text = "OFF";
+                                root.toggle-output("DeckLink", false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

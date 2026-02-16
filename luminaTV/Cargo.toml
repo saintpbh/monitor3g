@@ -1,0 +1,39 @@
+[package]
+name = "luminaTV"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core-foundation = "0.10.1"
+core-graphics = "0.25.0"
+cxx = "1.0.194"
+
+objc = "0.2.7"
+tokio = { version = "1.49.0", features = ["full"] }
+nokhwa = { version = "0.10.4", features = ["input-native"] }
+
+wgpu = "28.0.0"
+slint = "1.9.1"
+image = "0.25" # Match nokhwa's image version likely
+
+screencapturekit = { version = "1.5", features = ["async"] }
+
+
+# Mac AVFoundation (Phase 8) - Reverted to 0.6.3
+objc2 = "0.6.3"
+objc2-foundation = "0.3.2"
+objc2-av-foundation = "0.3.2"
+objc2-core-media = "0.3.2"
+objc2-core-video = "0.3.2"
+block2 = "0.6.0"
+dispatch2 = "0.3.0"
+
+
+
+
+[build-dependencies]
+bindgen = "0.72.1"
+cxx-build = "1.0.194"
+slint-build = "1.9.1"
+cc = "1.0"
+
