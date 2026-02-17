@@ -1,0 +1,102 @@
+   Compiling luminaTV v0.1.0 (/Users/bongpark/Library/CloudStorage/OneDrive-한국기독교장로회총회유지재단/0.박봉환개인문서폴더/앱개발/Monitor3G/luminaTV)
+warning: luminaTV@0.1.0: warning: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib: archive library: /Users/bongpark/Library/CloudStorage/OneDrive-한국기독교장로회총회유지재단/0.박봉환개인문서폴더/앱개발/Monitor3G/luminaTV/target/debug/build/luminaTV-74a961de9228802e/out/libluminatv-cxx.a the table of contents is empty (no object file members in the library define global symbols)
+warning: luminaTV@0.1.0: src/capture/camera_delegate.m:67:27: warning: variable 'delegate' set but not used [-Wunused-but-set-variable]
+warning: luminaTV@0.1.0:    67 |     LuminaCameraDelegate *delegate =
+warning: luminaTV@0.1.0:       |                           ^
+warning: luminaTV@0.1.0: 1 warning generated.
+error: extern blocks must be unsafe
+  --> src/capture/mac_avf.rs:28:1
+   |
+28 | / extern "C" {
+29 | |     fn create_lumina_delegate(
+30 | |         callback: extern "C" fn(*const u8, usize, c_int, c_int, usize, *mut c_void),
+31 | |         ctx: *mut c_void
+32 | |     ) -> *mut c_void;
+33 | | }
+   | |_^
+
+warning: unused imports: `ApiBackend` and `CameraInfo`
+ --> src/capture/camera.rs:1:21
+  |
+1 | use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType, CameraInfo};
+  |                     ^^^^^^^^^^                                                     ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `query`
+ --> src/capture/camera.rs:4:14
+  |
+4 | use nokhwa::{query, Camera};
+  |              ^^^^^
+
+warning: unused import: `Mutex`
+ --> src/capture/mac_avf.rs:1:22
+  |
+1 | use std::sync::{Arc, Mutex};
+  |                      ^^^^^
+
+warning: unused imports: `MainThreadMarker` and `NSObject`
+ --> src/capture/mac_avf.rs:7:24
+  |
+7 | use objc2_foundation::{MainThreadMarker, NSObject, NSString, NSDictionary, NSNumber, NSCopying};
+  |                        ^^^^^^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `AVAuthorizationStatus`, `AVCaptureConnection`, and `AVCaptureOutput`
+  --> src/capture/mac_avf.rs:11:33
+   |
+11 |     AVCaptureSessionPresetHigh, AVCaptureOutput, AVCaptureConnection,
+   |                                 ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^
+12 |     AVCaptureVideoDataOutputSampleBufferDelegate, AVAuthorizationStatus,
+   |                                                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `CVPixelBuffer`
+  --> src/capture/mac_avf.rs:16:24
+   |
+16 | use objc2_core_video::{CVPixelBuffer, kCVPixelFormatType_32BGRA};
+   |                        ^^^^^^^^^^^^^
+
+warning: unused imports: `ClassType` and `msg_send`
+  --> src/capture/mac_avf.rs:17:13
+   |
+17 | use objc2::{msg_send, ClassType}; // define_class removed
+   |             ^^^^^^^^  ^^^^^^^^^
+
+warning: unused import: `NSObjectProtocol`
+  --> src/capture/mac_avf.rs:18:38
+   |
+18 | use objc2::runtime::{ProtocolObject, NSObjectProtocol, Bool, AnyObject};
+   |                                      ^^^^^^^^^^^^^^^^
+
+warning: unused import: `dispatch2::DispatchRetained`
+  --> src/capture/mac_avf.rs:20:5
+   |
+20 | use dispatch2::DispatchRetained;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `c_long`
+  --> src/capture/mac_avf.rs:23:27
+   |
+23 | use std::os::raw::{c_int, c_long}; // c_void is in std::ffi
+   |                           ^^^^^^
+
+warning: unused imports: `AtomicBool` and `Ordering`
+ --> src/ndi/receiver.rs:6:31
+  |
+6 | use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+  |                               ^^^^^^^^^^  ^^^^^^^^
+
+warning: use of deprecated associated function `objc2_av_foundation::AVCaptureDevice::devicesWithMediaType`: Use AVCaptureDeviceDiscoverySession instead.
+   --> src/capture/mac_avf.rs:102:44
+    |
+102 |         let all_devices = AVCaptureDevice::devicesWithMediaType(media_type);
+    |                                            ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: `luminaTV` (bin "luminaTV") generated 12 warnings
+warning: luminaTV@0.1.0: warning: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ranlib: archive library: /Users/bongpark/Library/CloudStorage/OneDrive-한국기독교장로회총회유지재단/0.박봉환개인문서폴더/앱개발/Monitor3G/luminaTV/target/debug/build/luminaTV-74a961de9228802e/out/libluminatv-cxx.a the table of contents is empty (no object file members in the library define global symbols)
+warning: luminaTV@0.1.0: src/capture/camera_delegate.m:67:27: warning: variable 'delegate' set but not used [-Wunused-but-set-variable]
+warning: luminaTV@0.1.0:    67 |     LuminaCameraDelegate *delegate =
+warning: luminaTV@0.1.0:       |                           ^
+warning: luminaTV@0.1.0: 1 warning generated.
+error: could not compile `luminaTV` (bin "luminaTV") due to 1 previous error; 12 warnings emitted

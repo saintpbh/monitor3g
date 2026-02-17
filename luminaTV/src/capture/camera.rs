@@ -1,10 +1,11 @@
-use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType, CameraInfo};
+use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType};
 
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::{query, Camera};
 use tokio::sync::mpsc;
 use crate::core::{VideoFrame, StopSignal, ResolutionState, scale_rgba_vimage};
 use std::sync::Arc;
+// use std::time::Duration;
 
 
 #[cfg(target_os = "macos")]
@@ -29,55 +30,39 @@ pub fn list_cameras() -> Vec<(usize, String)> {
 
 #[cfg(target_os = "macos")]
 pub fn list_cameras() -> Vec<(usize, String)> {
-    let cameras = match query(ApiBackend::Auto) {
-        Ok(devices) => {
-             devices.iter().enumerate().map(|(i, d): (usize, &CameraInfo)| {
-                (i, d.human_name().to_string()) 
-             }).collect::<Vec<(usize, String)>>()
-        },
-        Err(e) => {
-            eprintln!("[Camera] Failed to list: {}", e);
-            Vec::new()
-        }
-    };
-    println!("[Camera] Found {} camera(s)", cameras.len());
-    cameras
+    let devices = mac_avf::list_devices();
+    let result = devices.iter().enumerate().map(|(i, (_, name))| {
+        (i, name.clone())
+    }).collect();
+    println!("[Camera] Found {} camera(s) via Native AVF", devices.len());
+    result
 }
 
+// Helper to request permission (exposed for main.rs)
+pub fn request_permission() {
+    mac_avf::request_permission();
+}
 
 #[cfg(target_os = "macos")]
 pub fn start_camera(camera_idx: usize, tx: mpsc::Sender<VideoFrame>, _res: ResolutionState) -> StopSignal {
     let stop = StopSignal::new();
     let stop_clone = stop.clone();
 
-    // We need the device unique ID.
-    // Re-query to find it.
-    let devices: Vec<nokhwa::utils::CameraInfo> = match query(ApiBackend::AVFoundation) {
-        Ok(d) => d,
-        Err(_) => return stop,
-    };
-
+    // Re-list to find unique ID
+    let devices = mac_avf::list_devices();
     
-    if camera_idx >= devices.len() { return stop; }
-    let info = &devices[camera_idx];
+    if camera_idx >= devices.len() {
+        eprintln!("[Camera] Index {} out of range", camera_idx);
+        return stop; 
+    }
     
-    // Nokhwa's misc() often holds the unique ID if index() is not it.
-    // Or `info.index()` might be the unique ID string wrapped.
-    let unique_id = match info.index() {
-        CameraIndex::String(s) => s.clone(),
-        _ => {
-            eprintln!("[Camera] AVF requires string ID, got {:?}", info.index());
-            return stop;
-        }
-    };
+    let (unique_id_ref, name_ref) = &devices[camera_idx];
+    let unique_id = unique_id_ref.clone();
+    let name = name_ref.clone();
 
-    println!("[Camera] Starting Native AVF Capture: {} ({})", info.human_name(), unique_id);
+    println!("[Camera] Starting Native AVF Capture: {} ({})", name, unique_id);
 
     std::thread::spawn(move || {
-        // Create session
-        // Note: AVF objects must be created/used typically on threads compatible with runloops or dispatch queues.
-        // Our `mac_avf` creates its own queue, so it should be fine.
-        
         let session = match mac_avf::CameraSession::start(&unique_id, tx) {
             Ok(s) => s,
             Err(e) => {
@@ -127,6 +112,7 @@ pub fn start_camera(camera_idx: usize, tx: mpsc::Sender<VideoFrame>, res: Resolu
     stop
 }
 
+#[allow(dead_code)]
 fn capture_loop(
     index: CameraIndex,
     tx: mpsc::Sender<VideoFrame>,

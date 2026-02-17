@@ -82,8 +82,18 @@ pub fn list_sources() -> (Vec<DisplayInfo>, Vec<WindowInfo>) {
         let width = frame.width as u32;
         let height = frame.height as u32;
 
-        // Filter out tiny windows and windows without owners
-        if owner.is_empty() || width < 100 || height < 100 {
+        // Filtering for useful windows
+        // 1. Must have owner
+        // 2. Must be on layer 0 (main app layer)
+        // 3. Must be on-screen
+        // 4. Must have minimum size
+        // 5. If it's a known app with ghost windows (PowerPoint, Chrome), it must have a title
+        if owner.is_empty() || w.window_layer() != 0 || !w.is_on_screen() || width < 100 || height < 100 {
+            return None;
+        }
+
+        // Specifically filter out titleless PowerPoint windows which are often background/utility
+        if title.is_empty() && owner.to_lowercase().contains("powerpoint") {
             return None;
         }
 
@@ -147,6 +157,8 @@ fn extract_bgra_from_pixel_buffer(pixel_buffer: &CVPixelBuffer) -> Option<(u32, 
                 .copy_from_slice(&src_data[src_offset..src_offset + copy_len]);
         }
     }
+    
+    if data.is_empty() { return None; }
 
     Some((width, height, data))
     // guard dropped here → auto-unlock
@@ -297,21 +309,38 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resolut
 
         let (tw, th) = res.input();
         let frame_rect = window.frame();
-        let (cap_w, cap_h) = if tw > 0 && th > 0 {
-            (tw, th)
+
+        let mut cap_w = if tw > 0 && th > 0 {
+            tw
         } else {
-            (frame_rect.width as u32, frame_rect.height as u32)
+            frame_rect.width as u32
+        };
+        let mut cap_h = if tw > 0 && th > 0 {
+            th
+        } else {
+            frame_rect.height as u32
+        };
+
+        // ScreenCaptureKit prefers even dimensions
+        if cap_w % 2 != 0 { cap_w += 1; }
+        if cap_h % 2 != 0 { cap_h += 1; }
+
+        let display = match content.displays().into_iter().next() {
+            Some(d) => d,
+            None => { eprintln!("[SCK] No display found for window context"); return; }
         };
 
         let filter = SCContentFilter::create()
-            .with_window(&window)
+            .with_display(&display)
+            .with_including_windows(&[&window])
             .build();
 
-        let config = SCStreamConfiguration::new()
-            .with_width(cap_w)
-            .with_height(cap_h)
-            .with_pixel_format(PixelFormat::BGRA);
-
+        let mut config = SCStreamConfiguration::new();
+        config.set_width(cap_w);
+        config.set_height(cap_h);
+        config.set_pixel_format(PixelFormat::BGRA);
+        config.set_shows_cursor(true);
+        
         println!("[SCK] Config: {}x{} BGRA window capture", cap_w, cap_h);
 
         let handler = WindowCaptureHandler {

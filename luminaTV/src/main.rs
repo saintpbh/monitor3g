@@ -22,12 +22,16 @@ struct SourceState {
     cameras: Vec<(usize, String)>,
     displays: Vec<capture::mac::DisplayInfo>,
     windows: Vec<capture::mac::WindowInfo>,
+    ndi_sources: Vec<String>,
     active_stop: Option<StopSignal>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
     println!("LuminaTV starting...");
+
+    #[cfg(target_os = "macos")]
+    capture::camera::request_permission();
 
     let output_state = core::output_state::OutputState::new();
     let preview_frame: core::compositor::PreviewFrame = Arc::new(Mutex::new(None));
@@ -60,6 +64,7 @@ async fn main() -> Result<(), slint::PlatformError> {
         cameras,
         displays,
         windows,
+        ndi_sources: Vec::new(),
         active_stop: None,
     }));
 
@@ -74,11 +79,10 @@ async fn main() -> Result<(), slint::PlatformError> {
         core::compositor::run_compositor(rx, output_state_comp, preview_frame_comp, res_comp).await;
     });
 
-    // NDI receiver background
-    let tx_ndi = tx.clone();
-    tokio::spawn(async move {
-        ndi::receiver::init_ndi_receiver(tx_ndi).await;
-    });
+    // NDI receiver background - (Removed, using on-demand discovery)
+    // tokio::spawn(async move {
+    //    // ndi::receiver::init_ndi_receiver(tx_ndi).await;
+    // });
 
     // UltraStudio / DeckLink background
     tokio::spawn(async move {
@@ -130,7 +134,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                 "Screen" => ss.displays.iter().map(|d| slint::SharedString::from(d.name.as_str())).collect(),
                 "Window" => ss.windows.iter().map(|w| slint::SharedString::from(w.name.as_str())).collect(),
                 "Camera" => ss.cameras.iter().map(|(_, n)| slint::SharedString::from(n.as_str())).collect(),
-                "NDI" => vec![slint::SharedString::from("Auto-discover")],
+                "NDI" => ss.ndi_sources.iter().map(|n| slint::SharedString::from(n.as_str())).collect(),
                 _ => vec![],
             };
             let model = std::rc::Rc::new(slint::VecModel::from(names));
@@ -170,6 +174,7 @@ async fn main() -> Result<(), slint::PlatformError> {
             "Window" => {
                 if idx < ss.windows.len() {
                     let w = &ss.windows[idx];
+                    println!("[UI] Selecting window: {} (ID {})", w.name, w.id);
                     let stop = capture::capture_window(w.id, tx_clone, res_clone);
                     if let Some(ui) = ui_handle2.upgrade() {
                         ui.set_source_name(slint::SharedString::from(w.name.as_str()));
@@ -192,6 +197,17 @@ async fn main() -> Result<(), slint::PlatformError> {
                     ss.active_stop = Some(stop);
                 }
             }
+            "NDI" => {
+                if idx < ss.ndi_sources.len() {
+                    let name = ss.ndi_sources[idx].clone();
+                    let stop = ndi::receiver::start_ndi_capture(name.clone(), tx_clone, res_clone);
+                     if let Some(ui) = ui_handle2.upgrade() {
+                        ui.set_source_name(slint::SharedString::from(name.as_str()));
+                        ui.set_source_details(slint::SharedString::from("NDI Connecting..."));
+                    }
+                    ss.active_stop = Some(stop);
+                }
+            }
             _ => {}
         }
     });
@@ -199,23 +215,56 @@ async fn main() -> Result<(), slint::PlatformError> {
     let ui_handle3 = ui.as_weak();
     let ss_refresh = source_state.clone();
     ui.on_refresh_sources(move || {
-        let mut ss = ss_refresh.lock().unwrap();
-        ss.cameras = capture::camera::list_cameras();
-        ss.displays = capture::list_displays();
-        ss.windows = capture::list_windows();
-        println!("[UI] Refreshed: {} cameras, {} displays, {} windows",
-            ss.cameras.len(), ss.displays.len(), ss.windows.len());
+        let ss_clone = ss_refresh.clone();
+        let ui_weak = ui_handle3.clone();
+        
+        tokio::spawn(async move {
+            println!("[UI] Refreshing sources...");
+            let cameras = capture::camera::list_cameras();
+            let (displays, windows) = capture::list_sources();
+            let ndi = ndi::receiver::discover_sources().await;
 
-        if let Some(ui) = ui_handle3.upgrade() {
-            let names: Vec<slint::SharedString> = match ss.current_type.as_str() {
+            let mut ss = ss_clone.lock().unwrap();
+            ss.cameras = cameras;
+            ss.displays = displays;
+            ss.windows = windows;
+            ss.ndi_sources = ndi;
+
+            println!("[UI] Refreshed: {} cameras, {} displays, {} windows, {} NDI",
+                ss.cameras.len(), ss.displays.len(), ss.windows.len(), ss.ndi_sources.len());
+
+            let current_type = ss.current_type.clone();
+            
+            // Re-populate UI list based on current selection
+            let names: Vec<slint::SharedString> = match current_type.as_str() {
                 "Screen" => ss.displays.iter().map(|d| slint::SharedString::from(d.name.as_str())).collect(),
                 "Window" => ss.windows.iter().map(|w| slint::SharedString::from(w.name.as_str())).collect(),
                 "Camera" => ss.cameras.iter().map(|(_, n)| slint::SharedString::from(n.as_str())).collect(),
+                "NDI" => ss.ndi_sources.iter().map(|n| slint::SharedString::from(n.as_str())).collect(),
                 _ => vec![],
             };
-            let model = std::rc::Rc::new(slint::VecModel::from(names));
-            ui.set_device_list(slint::ModelRc::from(model));
-        }
+            
+            // Update UI on main thread logic (via Slint's thread-safe upgrade)
+            // Slint handles are thread-safe for invoking methods? 
+            // set_device_list is a property setter, usually needs run_on_ui_thread or similar if from background.
+            // But here we are upgrading a Weak handle. 
+            // IMPORTANT: Slint's generated code `set_device_list` executes on the calling thread?
+            // If calling thread is background, it might panic or be UB if Slint backend isn't thread-safe (Winit isn't).
+            // Checked Slint docs: `invoke_from_event_loop` is needed. 
+            // `WeakAppWindow` is Send. `upgrade()` returns `AppWindow` which is Send?
+            // Actually, `active_stop` logic above runs in callback (Main Thread).
+            // But this spawn is background.
+            // I need to use `slint::invoke_from_event_loop`.
+            
+            // Move names (Vec<SharedString>) into the closure, construct model on UI thread
+            let _ = slint::invoke_from_event_loop(move || {
+                let model = std::rc::Rc::new(slint::VecModel::from(names));
+                let model_rc = slint::ModelRc::from(model);
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_device_list(model_rc);
+                }
+            });
+        });
     });
 
     let output_state_ui = output_state.clone();
