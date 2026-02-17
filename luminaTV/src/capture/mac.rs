@@ -85,22 +85,60 @@ pub fn list_sources() -> (Vec<DisplayInfo>, Vec<WindowInfo>) {
         // Filtering for useful windows
         // 1. Must have owner
         // 2. Must be on layer 0 (main app layer)
-        // 3. Must be on-screen
-        // 4. Must have minimum size
-        // 5. If it's a known app with ghost windows (PowerPoint, Chrome), it must have a title
-        if owner.is_empty() || w.window_layer() != 0 || !w.is_on_screen() || width < 100 || height < 100 {
+        // 3. Must be on-screen (RELAXED for PowerPoint as presentation might be on another space/off-screen)
+        // 4. Must have minimum size (100x100)
+        
+        let is_ppt = owner.to_lowercase().contains("powerpoint");
+        
+        // Debug Log for PPT
+        if is_ppt {
+            println!("[SCK DEBUG] PPT Window: '{}' (ID {}) Layer: {} OnScreen: {} Size: {}x{}", 
+                title, wid, w.window_layer(), w.is_on_screen(), width, height);
+        }
+
+        // Basic validity and size checks
+        if owner.is_empty() || w.window_layer() != 0 || width < 50 || height < 50 {
+             return None;
+        }
+
+        // Specific filtering for PowerPoint garbage
+        if is_ppt {
+            // Filter out menu bars/toolbars (very wide, very short)
+            if height < 100 { 
+                return None; 
+            }
+            // Filter out small square-ish icons/tools
+            if width < 200 {
+                return None;
+            }
+            // Filter out ALL untitled PowerPoint windows (based on logs, useful ones have titles)
+            if title.is_empty() {
+                return None;
+            }
+        }
+
+        // On-screen check: Strict for most apps, relaxed for PPT
+        if !is_ppt && !w.is_on_screen() {
             return None;
         }
 
-        // Specifically filter out titleless PowerPoint windows which are often background/utility
-        if title.is_empty() && owner.to_lowercase().contains("powerpoint") {
-            return None;
+        // Relaxed on-screen check for PPT
+        if is_ppt && !w.is_on_screen() {
+             // Ensure it's not tiny (though title check might cover this)
+             if width < 500 || height < 400 {
+                 return None;
+             }
         }
 
         let name = if title.is_empty() {
-            owner.clone()
+             format!("{} (Window {})", owner, wid)
         } else {
-            format!("{} – {}", owner, title)
+            // Detect Slide Show
+            if is_ppt && (title.contains("Slide Show") || title.contains("슬라이드 쇼")) {
+                format!("PowerPoint Slide Show ({})", title)
+            } else {
+                format!("{} – {}", owner, title)
+            }
         };
 
         Some(WindowInfo { id: wid, owner, name, width, height })
