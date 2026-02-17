@@ -23,7 +23,7 @@ export component AppWindow inherits Window {
     in-out property <string> source-name: "No Source";
     in-out property <string> source-details: "";
     in-out property <image> preview-image;
-    in-out property <[string]> source-type-list: ["Screen", "Window", "Camera", "NDI"];
+    in-out property <[string]> source-type-list: ["Screen", "Window", "Camera", "NDI", "Presentation"];
     in-out property <[string]> device-list: [];
     in-out property <[string]> resolution-list: [
         "4K UHD (3840x2160)",
@@ -221,6 +221,31 @@ export component AppWindow inherits Window {
                             } else {
                                 self.text = "OFF";
                                 root.toggle-output("DeckLink", false);
+                            }
+                        }
+                    }
+                }
+
+                // Virtual Screen toggle
+                HorizontalBox {
+                    spacing: 6px;
+                    Text {
+                        text: "Virtual Screen";
+                        color: #55ddaa;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        text: "OFF";
+                        clicked => {
+                            if (self.text == "OFF") {
+                                self.text = "ON";
+                                root.toggle-output("VirtualScreen", true);
+                            } else {
+                                self.text = "OFF";
+                                root.toggle-output("VirtualScreen", false);
                             }
                         }
                     }

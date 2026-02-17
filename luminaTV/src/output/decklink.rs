@@ -139,7 +139,16 @@ impl DeckLinkOutput {
             return;
         }
 
+        // SAFETY: Skip frame if data is missing (prevents null copy to hardware buffer)
+        if frame.data.is_none() {
+            return;
+        }
+
         unsafe {
+            if self.output.is_null() {
+                eprintln!("[DeckLink] Output pointer is null, skipping frame");
+                return;
+            }
             let out_vtable = &*(*self.output).vtable;
             let mut dl_frame: *mut IDeckLinkMutableVideoFrame = ptr::null_mut();
             
@@ -166,10 +175,12 @@ impl DeckLinkOutput {
                     let buf_vtable = &*(*dl_buffer_iface).vtable;
                     
                     if (buf_vtable.get_bytes)(dl_buffer as *mut c_void, &mut buffer_ptr) == S_OK {
-                        ptr::copy_nonoverlapping(frame.data.as_ptr(), buffer_ptr as *mut u8, (self.width * self.height * 4) as usize);
+                        if let Some(data) = &frame.data {
+                            ptr::copy_nonoverlapping(data.as_ptr(), buffer_ptr as *mut u8, (self.width * self.height * 4) as usize);
                         
-                        // Display Sync
-                        (out_vtable.display_video_frame_sync)(self.output as *mut c_void, dl_frame as *mut IDeckLinkVideoFrame);
+                            // Display Sync
+                            (out_vtable.display_video_frame_sync)(self.output as *mut c_void, dl_frame as *mut IDeckLinkVideoFrame);
+                        }
                     }
                     (buf_vtable.release)(dl_buffer as *mut c_void);
                 }

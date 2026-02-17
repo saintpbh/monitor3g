@@ -1,7 +1,7 @@
-use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType};
+use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
 
 use nokhwa::pixel_format::RgbAFormat;
-use nokhwa::{query, Camera};
+use nokhwa::Camera;
 use tokio::sync::mpsc;
 use crate::core::{VideoFrame, StopSignal, ResolutionState, scale_rgba_vimage};
 use std::sync::Arc;
@@ -181,9 +181,11 @@ fn capture_loop(
     println!("[Camera] Final: {}x{}", resolution.width(), resolution.height());
 
     let mut frame_count: u64 = 0;
+    let mut consecutive_errors: u64 = 0;
     while !stop.is_stopped() {
         match camera.frame() {
             Ok(buffer) => {
+                consecutive_errors = 0;  // Reset backoff on success
                 let decoded: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> = buffer.decode_image::<RgbAFormat>()
                     .map_err(|e| format!("decode: {}", e))?;
 
@@ -203,7 +205,9 @@ fn capture_loop(
 
                 let frame = VideoFrame {
                     width: out_w, height: out_h,
-                    data: Arc::new(data),
+                    data: Some(Arc::new(data)),
+                    #[cfg(target_os = "macos")]
+                    pixel_buffer: None,
                     timestamp: std::time::Instant::now(),
                 };
 
@@ -223,11 +227,13 @@ fn capture_loop(
             }
             Err(e) => {
                 if stop.is_stopped() { break; }
-                // Don't spam logs on minor timeouts/errors
-                if frame_count % 60 == 0 {
-                     eprintln!("[Camera] Frame error: {}", e);
+                // Exponential backoff: 10ms → 20ms → 40ms → ... → 500ms max
+                let backoff = std::cmp::min(10u64 << consecutive_errors.min(5), 500);
+                consecutive_errors += 1;
+                if consecutive_errors <= 3 || consecutive_errors % 60 == 0 {
+                    eprintln!("[Camera] Frame error ({}x): {} (backoff: {}ms)", consecutive_errors, e, backoff);
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(backoff));
             }
         }
     }

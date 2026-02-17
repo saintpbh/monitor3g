@@ -79,14 +79,49 @@ pub async fn run_compositor(
         let frame = latest;
         frame_count += 1;
 
+        // === HYDRATION: Ensure we have CPU data (Lazy Extraction) ===
+        // If the frame came from mac.rs (Zero-Copy), it has no data yet.
+        // We extract it here so downstream (NDI, DeckLink, Preview) can use it.
+        let data_ref = if let Some(ref d) = frame.data {
+             d.clone()
+        } else {
+             #[cfg(target_os = "macos")]
+             if let Some(ref pb) = frame.pixel_buffer {
+                 if let Some((_, _, extracted)) = crate::core::extract_bgra_from_pixel_buffer(pb) {
+                     Arc::new(extracted)
+                 } else {
+                     eprintln!("[Compositor] Failed to extract from pixel buffer");
+                     continue;
+                 }
+             } else {
+                 continue; // No data source
+             }
+             #[cfg(not(target_os = "macos"))]
+             continue;
+        };
+
+        // Create a wrapper frame that definitely has data
+        let hydrated_frame = VideoFrame {
+            width: frame.width, height: frame.height,
+            data: Some(data_ref.clone()), // Share the Arc
+            #[cfg(target_os = "macos")]
+            pixel_buffer: frame.pixel_buffer.clone(),
+            timestamp: frame.timestamp,
+        };
+        // Use hydrated_frame for the rest of the loop
+        let frame = hydrated_frame;
+
         // === Output: BGRA data goes DIRECTLY to NDI (zero copy/conversion!) ===
         let (out_w, out_h) = res_state.output();
         let output_frame = if out_w > 0 && out_h > 0 && (out_w != frame.width || out_h != frame.height) {
             // Output needs different resolution — scale BGRA data
-            let scaled = scale_rgba_vimage(&frame.data, frame.width, frame.height, out_w, out_h);
+            // We use .unwrap() because we just hydrated it above
+            let scaled = scale_rgba_vimage(frame.data.as_ref().unwrap(), frame.width, frame.height, out_w, out_h);
             VideoFrame {
                 width: out_w, height: out_h,
-                data: Arc::new(scaled),
+                data: Some(Arc::new(scaled)),
+                #[cfg(target_os = "macos")]
+                pixel_buffer: None,
                 timestamp: frame.timestamp,
             }
         } else {
@@ -103,27 +138,36 @@ pub async fn run_compositor(
             let _ = dl_tx.try_send(output_frame.clone());
         }
 
-        // === Preview: 1/4 resolution + BGRA→RGBA for Slint ===
+        // === Preview: Scaled to match OUTPUT resolution (half-size) + BGRA→RGBA for Slint ===
         if let Ok(mut preview) = preview_frame.try_lock() {
-            let pw = frame.width / 2;
-            let ph = frame.height / 2;
+            // Preview should match the OUTPUT aspect ratio, not the input frame.
+            // This ensures the preview shows exactly what NDI/DeckLink outputs.
+            let pw = if out_w > 0 { out_w / 2 } else { frame.width / 2 };
+            let ph = if out_h > 0 { out_h / 2 } else { frame.height / 2 };
 
             if pw > 0 && ph > 0 {
-                // Scale to 1/4 (less pixels to convert)
-                let mut preview_data = if pw != frame.width || ph != frame.height {
-                    scale_rgba_vimage(&frame.data, frame.width, frame.height, pw, ph)
+                // Scale from the output_frame (already scaled to output res) to preview size
+                let preview_data = if let Some(ref d) = output_frame.data {
+                    let mut scaled = if pw != output_frame.width || ph != output_frame.height {
+                        scale_rgba_vimage(d, output_frame.width, output_frame.height, pw, ph)
+                    } else {
+                        d.to_vec()
+                    };
+                    bgra_to_rgba_vimage(&mut scaled, pw, ph);
+                    Some(scaled)
                 } else {
-                    frame.data.to_vec()
+                    None
                 };
 
-                // BGRA → RGBA for Slint (vImage SIMD, <1ms on 1/4 size)
-                bgra_to_rgba_vimage(&mut preview_data, pw, ph);
-
-                *preview = Some(VideoFrame {
-                    width: pw, height: ph,
-                    data: Arc::new(preview_data),
-                    timestamp: frame.timestamp,
-                });
+                if let Some(d) = preview_data {
+                    *preview = Some(VideoFrame {
+                        width: pw, height: ph,
+                        data: Some(Arc::new(d)),
+                        #[cfg(target_os = "macos")]
+                        pixel_buffer: None,
+                        timestamp: frame.timestamp,
+                    });
+                }
             }
         }
 

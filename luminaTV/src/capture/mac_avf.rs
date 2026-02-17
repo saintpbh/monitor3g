@@ -66,7 +66,9 @@ extern "C" fn camera_frame_callback(
     let frame = VideoFrame {
         width: width as u32,
         height: height as u32,
-        data: Arc::new(vec),
+        data: Some(Arc::new(vec)),
+        #[cfg(target_os = "macos")]
+        pixel_buffer: None,
         timestamp: std::time::Instant::now(),
     };
     

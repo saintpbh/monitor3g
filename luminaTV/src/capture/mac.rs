@@ -6,11 +6,11 @@
 /// delivers frames already scaled — no vImage or CPU scaling needed.
 
 use screencapturekit::prelude::*;
-use screencapturekit::cv::{CVPixelBuffer, CVPixelBufferLockFlags};
+use screencapturekit::cm::CMSampleBuffer;
 use tokio::sync::mpsc;
 use crate::core::{VideoFrame, StopSignal, ResolutionState};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 // Re-export types for main.rs compatibility
@@ -21,12 +21,14 @@ pub struct DisplayInfo {
     pub height: u32,
 }
 
+#[derive(Clone, Debug)]
 pub struct WindowInfo {
     pub id: u32,
     pub owner: String,
     pub name: String,
     pub width: u32,
     pub height: u32,
+    pub is_presentation: bool,
 }
 
 // ========== Source Enumeration ==========
@@ -72,7 +74,7 @@ pub fn list_sources() -> (Vec<DisplayInfo>, Vec<WindowInfo>) {
         DisplayInfo { id, name, width: w, height: h }
     }).collect();
 
-    let windows: Vec<WindowInfo> = content.windows().iter().filter_map(|w| {
+    let mut windows: Vec<WindowInfo> = content.windows().iter().filter_map(|w| {
         let owner: String = w.owning_application()
             .map(|a| a.application_name())
             .unwrap_or_default();
@@ -141,10 +143,15 @@ pub fn list_sources() -> (Vec<DisplayInfo>, Vec<WindowInfo>) {
             }
         };
 
-        Some(WindowInfo { id: wid, owner, name, width, height })
+        let is_presentation = is_ppt && (name.contains("Slide Show") || name.contains("슬라이드 쇼") || name.contains("Presenting"));
+
+        Some(WindowInfo { id: wid, owner, name, width, height, is_presentation })
     }).collect();
 
-    println!("[SCK] Found {} display(s), {} window(s)", displays.len(), windows.len());
+    // Sort: Presentations first!
+    windows.sort_by(|a, b| b.is_presentation.cmp(&a.is_presentation));
+
+    // println!("[SCK] Found {} display(s), {} window(s)", displays.len(), windows.len());
     (displays, windows)
 }
 
@@ -160,75 +167,40 @@ pub fn list_windows() -> Vec<WindowInfo> {
 
 // ========== Frame Extraction Helper ==========
 
-/// Extract BGRA pixel data from a CVPixelBuffer using RAII lock guard.
-/// Returns (width, height, data) or None if the buffer is invalid.
-fn extract_bgra_from_pixel_buffer(pixel_buffer: &CVPixelBuffer) -> Option<(u32, u32, Vec<u8>)> {
-    let width = pixel_buffer.width() as u32;
-    let height = pixel_buffer.height() as u32;
-    if width == 0 || height == 0 { return None; }
-
-    // RAII lock — automatically unlocks when guard drops
-    let guard = pixel_buffer.lock(CVPixelBufferLockFlags::READ_ONLY).ok()?;
-    let bytes_per_row = guard.bytes_per_row();
-    let src_data = guard.as_slice();
-
-    if src_data.is_empty() { return None; }
-
-    let dst_stride = (width * 4) as usize;
-
-    // If bytes_per_row matches, single memcpy
-    if bytes_per_row == dst_stride {
-        let expected = dst_stride * height as usize;
-        if src_data.len() >= expected {
-            return Some((width, height, src_data[..expected].to_vec()));
-        }
-    }
-
-    // Row-by-row copy to remove padding
-    let mut data = vec![0u8; dst_stride * height as usize];
-    for y in 0..height as usize {
-        let src_offset = y * bytes_per_row;
-        let dst_offset = y * dst_stride;
-        let copy_len = dst_stride.min(bytes_per_row);
-        if src_offset + copy_len <= src_data.len() {
-            data[dst_offset..dst_offset + copy_len]
-                .copy_from_slice(&src_data[src_offset..src_offset + copy_len]);
-        }
-    }
-    
-    if data.is_empty() { return None; }
-
-    Some((width, height, data))
-    // guard dropped here → auto-unlock
-}
 
 // ========== Display Capture ==========
 
 struct DisplayCaptureHandler {
     tx: mpsc::Sender<VideoFrame>,
-    stop: Arc<AtomicBool>,
+    stop: StopSignal,
     frame_count: AtomicU64,
 }
 
 impl SCStreamOutputTrait for DisplayCaptureHandler {
     fn did_output_sample_buffer(&self, sample: CMSampleBuffer, _of_type: SCStreamOutputType) {
-        if self.stop.load(Ordering::Relaxed) { return; }
+        if self.stop.is_stopped() { return; }
 
         if let Some(pixel_buffer) = sample.image_buffer() {
-            if let Some((width, height, data)) = extract_bgra_from_pixel_buffer(&pixel_buffer) {
-                let frame = VideoFrame {
-                    width, height,
-                    data: Arc::new(data),
-                    timestamp: Instant::now(),
-                };
+            // ARC the pixel buffer for sharing
+            let pixel_buffer_arc = Arc::new(pixel_buffer);
+            let width = pixel_buffer_arc.width() as u32;
+            let height = pixel_buffer_arc.height() as u32;
 
-                // Non-blocking send (drop frame if channel full)
-                let _ = self.tx.try_send(frame);
+            // LAZY EXTRACTION: skip CPU copy!
+            let frame = VideoFrame {
+                width, height,
+                data: None, // Lazy extract in Compositor if needed
+                #[cfg(target_os = "macos")]
+                pixel_buffer: Some(pixel_buffer_arc.clone()),
+                timestamp: Instant::now(),
+            };
 
-                let count = self.frame_count.fetch_add(1, Ordering::Relaxed) + 1;
-                if count % 60 == 0 {
-                    println!("[SCK] {} frames ({}x{} BGRA, GPU-scaled)", count, width, height);
-                }
+            // Non-blocking send (drop frame if channel full)
+            let _ = self.tx.try_send(frame);
+
+            let count = self.frame_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % 60 == 0 {
+                println!("[SCK] {} frames ({}x{}) - Zero Copy Mode", count, width, height);
             }
         }
     }
@@ -236,9 +208,8 @@ impl SCStreamOutputTrait for DisplayCaptureHandler {
 
 pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: ResolutionState) -> StopSignal {
     let stop = StopSignal::new();
-    let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
-    let stop_flag_clone = stop_flag.clone();
+    let stop_for_handler = stop.clone();
 
     println!("[SCK] Starting display capture: ID {}", display_id);
 
@@ -271,7 +242,7 @@ pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resol
 
         let handler = DisplayCaptureHandler {
             tx,
-            stop: stop_flag_clone.clone(),
+            stop: stop_for_handler,
             frame_count: AtomicU64::new(0),
         };
 
@@ -287,7 +258,6 @@ pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resol
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        stop_flag_clone.store(true, Ordering::Relaxed);
         let _ = stream.stop_capture();
         println!("[SCK] Display capture stopped.");
     });
@@ -299,38 +269,48 @@ pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resol
 
 struct WindowCaptureHandler {
     tx: mpsc::Sender<VideoFrame>,
-    stop: Arc<AtomicBool>,
+    stop: StopSignal,
     frame_count: AtomicU64,
 }
 
 impl SCStreamOutputTrait for WindowCaptureHandler {
     fn did_output_sample_buffer(&self, sample: CMSampleBuffer, _of_type: SCStreamOutputType) {
-        if self.stop.load(Ordering::Relaxed) { return; }
+        if self.stop.is_stopped() { return; }
 
         if let Some(pixel_buffer) = sample.image_buffer() {
-            if let Some((width, height, data)) = extract_bgra_from_pixel_buffer(&pixel_buffer) {
-                let frame = VideoFrame {
-                    width, height,
-                    data: Arc::new(data),
-                    timestamp: Instant::now(),
-                };
+            // ARC the pixel buffer for sharing
+            let pixel_buffer_arc = Arc::new(pixel_buffer);
+            let width = pixel_buffer_arc.width() as u32;
+            let height = pixel_buffer_arc.height() as u32;
 
-                let _ = self.tx.try_send(frame);
+            let frame = VideoFrame {
+                width, height,
+                data: None,
+                #[cfg(target_os = "macos")]
+                pixel_buffer: Some(pixel_buffer_arc.clone()),
+                timestamp: Instant::now(),
+            };
 
-                let count = self.frame_count.fetch_add(1, Ordering::Relaxed) + 1;
-                if count % 60 == 0 {
-                    println!("[SCK Window] {} frames ({}x{})", count, width, height);
+            match self.tx.try_send(frame) {
+                Ok(_) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {}
+                Err(e) => {
+                         eprintln!("[SCK Window] Channel closed: {:?}", e);
                 }
+            }
+
+            let count = self.frame_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % 60 == 0 {
+                println!("[SCK Window] {} frames ({}x{}) - Zero Copy Mode", count, width, height);
             }
         }
     }
 }
 
-pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, res: ResolutionState) -> StopSignal {
+pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, _res: ResolutionState) -> StopSignal {
     let stop = StopSignal::new();
-    let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
-    let stop_flag_clone = stop_flag.clone();
+    let stop_for_handler = stop.clone();
 
     println!("[SCK] Starting window capture: ID {}", window_id);
 
@@ -345,19 +325,20 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resolut
             None => { eprintln!("[SCK] Window {} not found", window_id); return; }
         };
 
-        let (tw, th) = res.input();
         let frame_rect = window.frame();
 
-        let mut cap_w = if tw > 0 && th > 0 {
-            tw
-        } else {
-            frame_rect.width as u32
-        };
-        let mut cap_h = if tw > 0 && th > 0 {
-            th
-        } else {
-            frame_rect.height as u32
-        };
+        // IMPORTANT: Always capture at the window's native size!
+        // ScreenCaptureKit renders the window at its native resolution within the buffer.
+        // If we request a larger buffer (e.g. 1920x1080 for a 854x540 window),
+        // the content floats in a corner with black padding.
+        // By capturing at native size, the content fills the entire frame.
+        // The compositor then scales this to the output resolution for full-screen output.
+        let mut cap_w = frame_rect.width as u32;
+        let mut cap_h = frame_rect.height as u32;
+
+        // Minimum size guard
+        if cap_w == 0 { cap_w = 1920; }
+        if cap_h == 0 { cap_h = 1080; }
 
         // ScreenCaptureKit prefers even dimensions
         if cap_w % 2 != 0 { cap_w += 1; }
@@ -383,7 +364,7 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resolut
 
         let handler = WindowCaptureHandler {
             tx,
-            stop: stop_flag_clone.clone(),
+            stop: stop_for_handler,
             frame_count: AtomicU64::new(0),
         };
 
@@ -399,7 +380,6 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resolut
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        stop_flag_clone.store(true, Ordering::Relaxed);
         let _ = stream.stop_capture();
         println!("[SCK] Window capture stopped.");
     });

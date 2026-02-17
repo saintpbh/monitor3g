@@ -3,7 +3,9 @@ pub mod compositor;
 pub mod output_state;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use screencapturekit::cv::{CVPixelBuffer, CVPixelBufferLockFlags};
 use std::ffi::c_void;
 
 /// Video frame with zero-copy data sharing via Arc
@@ -11,7 +13,9 @@ use std::ffi::c_void;
 pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
-    pub data: Arc<Vec<u8>>,
+    pub data: Option<Arc<Vec<u8>>>,
+    #[cfg(target_os = "macos")]
+    pub pixel_buffer: Option<std::sync::Arc<screencapturekit::cv::CVPixelBuffer>>,
     pub timestamp: std::time::Instant,
 }
 
@@ -51,43 +55,46 @@ pub const RESOLUTION_PRESETS: &[Resolution] = &[
     Resolution { width: 0,    height: 0,    label: "Native" },
 ];
 
+/// Pack width+height into a single u64 for atomic read/write (prevents torn reads)
+fn pack_resolution(w: u32, h: u32) -> u64 {
+    ((w as u64) << 32) | (h as u64)
+}
+fn unpack_resolution(packed: u64) -> (u32, u32) {
+    ((packed >> 32) as u32, packed as u32)
+}
+
 /// Shared resolution state (atomic for lock-free access)
+/// Uses AtomicU64 packing to prevent torn reads (width/height always consistent)
 #[derive(Clone)]
 pub struct ResolutionState {
-    pub input_w: Arc<AtomicU32>,
-    pub input_h: Arc<AtomicU32>,
-    pub output_w: Arc<AtomicU32>,
-    pub output_h: Arc<AtomicU32>,
+    input: Arc<AtomicU64>,
+    output: Arc<AtomicU64>,
 }
 
 impl ResolutionState {
     pub fn new() -> Self {
         Self {
-            input_w: Arc::new(AtomicU32::new(1920)),
-            input_h: Arc::new(AtomicU32::new(1080)),
-            output_w: Arc::new(AtomicU32::new(1920)),
-            output_h: Arc::new(AtomicU32::new(1080)),
+            input: Arc::new(AtomicU64::new(pack_resolution(1920, 1080))),
+            output: Arc::new(AtomicU64::new(pack_resolution(1920, 1080))),
         }
     }
 
     pub fn set_input(&self, w: u32, h: u32) {
-        self.input_w.store(w, Ordering::Relaxed);
-        self.input_h.store(h, Ordering::Relaxed);
+        self.input.store(pack_resolution(w, h), Ordering::Release);
         println!("[Resolution] Input: {}x{}", w, h);
     }
 
     pub fn set_output(&self, w: u32, h: u32) {
-        self.output_w.store(w, Ordering::Relaxed);
-        self.output_h.store(h, Ordering::Relaxed);
+        self.output.store(pack_resolution(w, h), Ordering::Release);
         println!("[Resolution] Output: {}x{}", w, h);
     }
 
     pub fn input(&self) -> (u32, u32) {
-        (self.input_w.load(Ordering::Relaxed), self.input_h.load(Ordering::Relaxed))
+        unpack_resolution(self.input.load(Ordering::Acquire))
     }
 
     pub fn output(&self) -> (u32, u32) {
-        (self.output_w.load(Ordering::Relaxed), self.output_h.load(Ordering::Relaxed))
+        unpack_resolution(self.output.load(Ordering::Acquire))
     }
 }
 
@@ -172,6 +179,103 @@ pub fn scale_rgba_vimage(
     if result != 0 {
         eprintln!("[vImage] Scale error: {}", result);
     }
-
     dst
+}
+
+#[cfg(target_os = "macos")]
+pub fn extract_bgra_from_pixel_buffer(pixel_buffer: &CVPixelBuffer) -> Option<(u32, u32, Vec<u8>)> {
+    let width = pixel_buffer.width() as u32;
+    let height = pixel_buffer.height() as u32;
+    if width == 0 || height == 0 { return None; }
+
+    // RAII lock — automatically unlocks when guard drops
+    let guard = pixel_buffer.lock(CVPixelBufferLockFlags::READ_ONLY).ok()?;
+    let bytes_per_row = guard.bytes_per_row();
+    let src_data = guard.as_slice();
+
+    if src_data.is_empty() { return None; }
+
+    let dst_stride = (width * 4) as usize;
+
+    // If bytes_per_row matches, single memcpy
+    if bytes_per_row == dst_stride {
+        let expected = dst_stride * height as usize;
+        if src_data.len() >= expected {
+            return Some((width, height, src_data[..expected].to_vec()));
+        }
+    }
+
+    // Row-by-row copy to remove padding
+    let mut data = vec![0u8; dst_stride * height as usize];
+    for y in 0..height as usize {
+        let src_offset = y * bytes_per_row;
+        let dst_offset = y * dst_stride;
+        let copy_len = dst_stride.min(bytes_per_row);
+        if src_offset + copy_len <= src_data.len() {
+            if let Some(dst_slice) = data.get_mut(dst_offset..dst_offset + copy_len) {
+                 dst_slice.copy_from_slice(&src_data[src_offset..src_offset + copy_len]);
+            }
+        }
+    }
+    
+    if data.is_empty() { return None; }
+    Some((width, height, data))
+}
+
+/// Efficiently scale and convert CVPixelBuffer directly to RGBA Vec<u8>
+/// This avoids a redundant full-resolution copy.
+#[cfg(target_os = "macos")]
+pub fn scale_pixel_buffer_vimage(
+    pixel_buffer: &CVPixelBuffer,
+    dst_w: u32, dst_h: u32,
+    convert_to_rgba: bool,
+) -> Option<Vec<u8>> {
+    let src_w = pixel_buffer.width() as u32;
+    let src_h = pixel_buffer.height() as u32;
+    if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 { return None; }
+
+    // RAII lock
+    let guard = pixel_buffer.lock(CVPixelBufferLockFlags::READ_ONLY).ok()?;
+    let src_data = guard.as_slice();
+    let src_row_bytes = guard.bytes_per_row();
+
+    let mut dst = vec![0u8; (dst_w * dst_h * 4) as usize];
+    let dst_row_bytes = (dst_w * 4) as usize;
+
+    let src_buf = vImage_Buffer {
+        data: src_data.as_ptr() as *mut c_void,
+        height: src_h as usize,
+        width: src_w as usize,
+        row_bytes: src_row_bytes,
+    };
+
+    let dst_buf = vImage_Buffer {
+        data: dst.as_mut_ptr() as *mut c_void,
+        height: dst_h as usize,
+        width: dst_w as usize,
+        row_bytes: dst_row_bytes,
+    };
+
+    // 1. Scale
+    let result = unsafe {
+        vImageScale_ARGB8888(&src_buf, &dst_buf, std::ptr::null_mut(), 0)
+    };
+
+    if result != 0 {
+        eprintln!("[vImage] Scale error from pixel buffer: {}", result);
+        return None;
+    }
+
+    // 2. Convert BGRA -> RGBA if requested
+    if convert_to_rgba {
+        let permute_map: [u8; 4] = [2, 1, 0, 3];
+        let res = unsafe {
+            vImagePermuteChannels_ARGB8888(&dst_buf, &dst_buf, permute_map.as_ptr(), 0)
+        };
+        if res != 0 {
+            eprintln!("[vImage] Permute error: {}", res);
+        }
+    }
+
+    Some(dst)
 }

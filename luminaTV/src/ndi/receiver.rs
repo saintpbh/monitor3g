@@ -24,19 +24,17 @@ pub async fn discover_sources() -> Vec<String> {
             // Wait for discovery
             std::thread::sleep(Duration::from_secs(2));
 
-            let mut count = 0;
+            let mut count: u32 = 0;
             let p_sources = ffi::NDIlib_find_get_current_sources(p_ndi_find, &mut count);
             
-            // Note: count might be ignored by some SDK versions, relying on null check
-            // check if p_sources is not null
-            if !p_sources.is_null() {
-                 let mut i = 0;
-                 while !(*p_sources.add(i)).p_ndi_name.is_null() {
-                     let src = *p_sources.add(i);
-                     let name = CStr::from_ptr(src.p_ndi_name).to_string_lossy().to_string();
-                     found_sources.push(name);
-                     i += 1;
-                 }
+            // Use count for bounds checking (prevents buffer overread)
+            if !p_sources.is_null() && count > 0 {
+                for i in 0..count as usize {
+                    let src = *p_sources.add(i);
+                    if src.p_ndi_name.is_null() { break; }
+                    let name = CStr::from_ptr(src.p_ndi_name).to_string_lossy().to_string();
+                    found_sources.push(name);
+                }
             }
 
             ffi::NDIlib_find_destroy(p_ndi_find);
@@ -142,10 +140,17 @@ pub fn start_ndi_capture(source_name: String, tx: mpsc::Sender<VideoFrame>, _res
                             // Send frame
                             let frame = VideoFrame {
                                 width: w, height: h,
-                                data: Arc::new(capture_data),
+                                data: Some(Arc::new(capture_data)),
+                                #[cfg(target_os = "macos")]
+                                pixel_buffer: None,
                                 timestamp: std::time::Instant::now(),
                             };
-                            let _ = tx.blocking_send(frame);
+                            // Non-blocking: drop frame if compositor can't keep up
+                            match tx.try_send(frame) {
+                                Ok(_) => {},
+                                Err(mpsc::error::TrySendError::Full(_)) => {}, // Drop frame
+                                Err(_) => break, // Channel closed
+                            }
                             
                             frame_count += 1;
                             if frame_count % 300 == 0 {
@@ -159,10 +164,10 @@ pub fn start_ndi_capture(source_name: String, tx: mpsc::Sender<VideoFrame>, _res
                 }
             }
 
-            // Cleanup
+            // Cleanup — only destroy receiver, NOT global NDI lib
+            // (NDI sender thread may still be active)
             println!("[NDI] Stopping capture...");
             ffi::NDIlib_recv_destroy(p_recv);
-            ffi::NDIlib_destroy();
         }
     });
 

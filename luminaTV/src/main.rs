@@ -24,6 +24,7 @@ struct SourceState {
     windows: Vec<capture::mac::WindowInfo>,
     ndi_sources: Vec<String>,
     active_stop: Option<StopSignal>,
+    virtual_display: Option<capture::VirtualDisplay>,
 }
 
 #[tokio::main]
@@ -66,10 +67,11 @@ async fn main() -> Result<(), slint::PlatformError> {
         windows,
         ndi_sources: Vec::new(),
         active_stop: None,
+        virtual_display: None,
     }));
 
-    // Frame channel — small buffer for minimal latency
-    let (tx, rx) = tokio::sync::mpsc::channel(2);
+    // Frame channel — buffer for dual-output stability (NDI + DeckLink)
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
 
     // Start compositor
     let output_state_comp = output_state.clone();
@@ -124,7 +126,10 @@ async fn main() -> Result<(), slint::PlatformError> {
         let st = source_type.to_string();
         println!("[UI] Source type: {}", st);
 
-        let mut ss = ss_type.lock().unwrap();
+        let mut ss = match ss_type.lock() {
+            Ok(g) => g,
+            Err(poisoned) => { eprintln!("[UI] Mutex poisoned, recovering"); poisoned.into_inner() }
+        };
         if let Some(ref stop) = ss.active_stop { stop.stop(); }
         ss.active_stop = None;
         ss.current_type = st.clone();
@@ -150,7 +155,10 @@ async fn main() -> Result<(), slint::PlatformError> {
     let res_device = res_state.clone();
     ui.on_select_device(move |idx| {
         let idx = idx as usize;
-        let mut ss = ss_device.lock().unwrap();
+        let mut ss = match ss_device.lock() {
+            Ok(g) => g,
+            Err(poisoned) => { eprintln!("[UI] Mutex poisoned, recovering"); poisoned.into_inner() }
+        };
         if let Some(ref stop) = ss.active_stop { stop.stop(); }
         ss.active_stop = None;
 
@@ -208,6 +216,22 @@ async fn main() -> Result<(), slint::PlatformError> {
                     ss.active_stop = Some(stop);
                 }
             }
+            "Presentation" => {
+                // Find presentation windows
+                let pres_windows: Vec<_> = ss.windows.iter().filter(|w| w.is_presentation).collect();
+                if idx < pres_windows.len() {
+                    let w = pres_windows[idx];
+                    println!("[UI] Starting Presentation Capture: {}", w.name);
+                    let stop = capture::capture_window(w.id, tx_clone, res_clone);
+                    if let Some(ui) = ui_handle2.upgrade() {
+                        ui.set_source_name(slint::SharedString::from(w.name.as_str()));
+                        ui.set_source_details(slint::SharedString::from("Presentation (Window)"));
+                    }
+                    ss.active_stop = Some(stop);
+                } else {
+                    println!("[UI] Presentation selected but index out of bounds (or waiting)");
+                }
+            }
             _ => {}
         }
     });
@@ -224,7 +248,10 @@ async fn main() -> Result<(), slint::PlatformError> {
             let (displays, windows) = capture::list_sources();
             let ndi = ndi::receiver::discover_sources().await;
 
-            let mut ss = ss_clone.lock().unwrap();
+            let mut ss = match ss_clone.lock() {
+                Ok(g) => g,
+                Err(poisoned) => { eprintln!("[UI] Mutex poisoned, recovering"); poisoned.into_inner() }
+            };
             ss.cameras = cameras;
             ss.displays = displays;
             ss.windows = windows;
@@ -241,6 +268,14 @@ async fn main() -> Result<(), slint::PlatformError> {
                 "Window" => ss.windows.iter().map(|w| slint::SharedString::from(w.name.as_str())).collect(),
                 "Camera" => ss.cameras.iter().map(|(_, n)| slint::SharedString::from(n.as_str())).collect(),
                 "NDI" => ss.ndi_sources.iter().map(|n| slint::SharedString::from(n.as_str())).collect(),
+                "Presentation" => {
+                    let p_wins: Vec<_> = ss.windows.iter().filter(|w| w.is_presentation).collect();
+                    if p_wins.is_empty() {
+                         vec![slint::SharedString::from("Waiting for Slide Show...")]
+                    } else {
+                         p_wins.iter().map(|w| slint::SharedString::from(format!("READY: {}", w.name).as_str())).collect()
+                    }
+                },
                 _ => vec![],
             };
             
@@ -269,27 +304,139 @@ async fn main() -> Result<(), slint::PlatformError> {
 
     let output_state_ui = output_state.clone();
     let ui_handle4 = ui.as_weak();
+    let ss_toggle = source_state.clone();
+    let tx_toggle = tx.clone();
+    let res_toggle = res_state.clone();
     ui.on_toggle_output(move |output_type, state| {
         println!("[UI] Toggle {} output: {}", output_type, state);
         if output_type == "NDI" { output_state_ui.set_ndi(state); }
         else if output_type == "DeckLink" { output_state_ui.set_decklink(state); }
+        else if output_type == "VirtualScreen" {
+            let mut ss = match ss_toggle.lock() {
+                Ok(g) => g,
+                Err(p) => { eprintln!("[UI] Mutex poisoned, recovering"); p.into_inner() }
+            };
+
+            if state {
+                // Create virtual display at output resolution
+                let (out_w, out_h) = res_toggle.output();
+                let (w, h) = if out_w > 0 && out_h > 0 { (out_w, out_h) } else { (1920, 1080) };
+
+                match capture::VirtualDisplay::new(w, h, "LuminaTV Virtual") {
+                    Some(vd) => {
+                        let display_id = vd.display_id();
+                        println!("[VirtualScreen] ON — Display ID: {}", display_id);
+
+                        // Stop any existing capture
+                        if let Some(ref stop) = ss.active_stop {
+                            stop.stop();
+                        }
+
+                        // Auto-start capturing the virtual display
+                        let stop = capture::capture_display(
+                            display_id, tx_toggle.clone(), res_toggle.clone()
+                        );
+                        ss.active_stop = Some(stop);
+                        ss.current_type = "Screen".to_string();
+                        ss.virtual_display = Some(vd);
+                    }
+                    None => {
+                        eprintln!("[VirtualScreen] Failed to create (macOS 14+ required)");
+                    }
+                }
+            } else {
+                // Stop capture and destroy virtual display
+                if let Some(ref stop) = ss.active_stop {
+                    stop.stop();
+                }
+                ss.active_stop = None;
+                ss.virtual_display = None; // Drop triggers destroy
+                println!("[VirtualScreen] OFF — Virtual display removed");
+            }
+        }
+
         if let Some(ui) = ui_handle4.upgrade() {
             let ndi_s = if output_state_ui.is_ndi_enabled() { "ON" } else { "OFF" };
             let dl_s = if output_state_ui.is_decklink_enabled() { "ON" } else { "OFF" };
-            ui.set_source_details(slint::SharedString::from(format!("NDI: {} | DeckLink: {}", ndi_s, dl_s)));
+            let vs_s = {
+                let ss = match ss_toggle.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner()
+                };
+                if ss.virtual_display.is_some() { "ON" } else { "OFF" }
+            };
+            ui.set_source_details(slint::SharedString::from(
+                format!("NDI: {} | DeckLink: {} | VScreen: {}", ndi_s, dl_s, vs_s)
+            ));
         }
     });
 
     // Auto-start main display capture
     {
-        let ss = source_state.lock().unwrap();
+        let ss = match source_state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => { eprintln!("[UI] Mutex poisoned, recovering"); poisoned.into_inner() }
+        };
         if !ss.displays.is_empty() {
             let d = &ss.displays[0];
             let stop = capture::capture_display(d.id, tx.clone(), res_state.clone());
             drop(ss);
-            source_state.lock().unwrap().active_stop = Some(stop);
+            match source_state.lock() {
+                Ok(mut g) => g.active_stop = Some(stop),
+                Err(poisoned) => { eprintln!("[UI] Mutex poisoned, recovering"); poisoned.into_inner().active_stop = Some(stop); }
+            }
         }
     }
+
+    // === Auto-Latch / Presentation Scanner Loop ===
+    let ss_latch = source_state.clone();
+    let ui_latch = ui.as_weak();
+    let tx_latch = tx.clone();
+    let res_latch = res_state.clone();
+    
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+            let (is_pres_mode, needs_start) = {
+                let ss = match ss_latch.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                (ss.current_type == "Presentation", ss.active_stop.is_none())
+            };
+
+            if is_pres_mode && needs_start {
+                // Scan quickly for presentation
+                let (_, windows) = capture::list_sources();
+                if let Some(target) = windows.iter().find(|w| w.is_presentation) {
+                     println!("[AutoLatch] Found Slide Show: {}", target.name);
+                     
+                     // Start capture
+                     let stop = capture::capture_window(target.id, tx_latch.clone(), res_latch.clone());
+                     
+                     // Update State
+                     {
+                        let mut ss = match ss_latch.lock() {
+                            Ok(g) => g,
+                            Err(p) => p.into_inner(),
+                        };
+                        ss.active_stop = Some(stop);
+                     }
+
+                     // Update UI
+                     let ui_weak = ui_latch.clone();
+                     let name = target.name.clone();
+                     let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                             ui.set_source_name(slint::SharedString::from(name.as_str()));
+                             ui.set_source_details(slint::SharedString::from("Auto-Latched Presentation"));
+                        }
+                     });
+                }
+            }
+        }
+    });
 
     // Preview timer (~60fps)
     let ui_handle_preview = ui.as_weak();
@@ -309,21 +456,21 @@ async fn main() -> Result<(), slint::PlatformError> {
                 if let Some(ui) = ui_handle_preview.upgrade() {
                     let w = frame.width;
                     let h = frame.height;
-                    let data = &*frame.data;
+                    if let Some(data) = frame.data {
+                        let mut pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
+                        let expected_len = (w * h * 4) as usize;
+                        let slice = pixel_buffer.make_mut_bytes();
 
-                    let mut pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w, h);
-                    let expected_len = (w * h * 4) as usize;
-                    let slice = pixel_buffer.make_mut_bytes();
+                        if data.len() >= expected_len {
+                            slice.copy_from_slice(&data[..expected_len]);
+                        } else {
+                            let copy_len = std::cmp::min(data.len(), slice.len());
+                            slice[..copy_len].copy_from_slice(&data[..copy_len]);
+                        }
 
-                    if data.len() >= expected_len {
-                        slice.copy_from_slice(&data[..expected_len]);
-                    } else {
-                        let copy_len = std::cmp::min(data.len(), slice.len());
-                        slice[..copy_len].copy_from_slice(&data[..copy_len]);
+                        let image = slint::Image::from_rgba8(pixel_buffer);
+                        ui.set_preview_image(image);
                     }
-
-                    let image = slint::Image::from_rgba8(pixel_buffer);
-                    ui.set_preview_image(image);
                 }
             }
         },

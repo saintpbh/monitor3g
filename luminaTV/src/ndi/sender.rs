@@ -34,7 +34,16 @@ impl NdiSender {
     }
 
     /// Send a VideoFrame over NDI using BGRA format.
+    /// SAFETY: Skips frame if data is None to prevent null pointer dereference in NDI SDK.
     pub fn send_frame(&self, frame: &VideoFrame) {
+        let data = match &frame.data {
+            Some(d) => d,
+            None => {
+                // CRITICAL: NDI SDK does not check for null p_data — skip frame
+                return;
+            }
+        };
+
         let line_stride = (frame.width * 4) as i32; // BGRA = 4 bytes per pixel
 
         let ndi_frame = ffi::NDIlib_video_frame_v2_t {
@@ -46,7 +55,7 @@ impl NdiSender {
             picture_aspect_ratio: 0.0, // auto
             frame_format_type: ffi::NDIlib_frame_format_type_e_NDIlib_frame_format_type_progressive,
             timecode: ffi::NDIlib_send_timecode_synthesize,
-            p_data: frame.data.as_ptr() as *mut u8,
+            p_data: data.as_ptr() as *mut u8,
             __bindgen_anon_1: ffi::NDIlib_video_frame_v2_t__bindgen_ty_1 {
                 line_stride_in_bytes: line_stride,
             },

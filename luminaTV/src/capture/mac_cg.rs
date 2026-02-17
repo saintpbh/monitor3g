@@ -106,7 +106,9 @@ pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resol
 
                 let frame = VideoFrame {
                     width: out_w, height: out_h,
-                    data: Arc::new(data),
+                    data: Some(Arc::new(data)),
+                    #[cfg(target_os = "macos")]
+                    pixel_buffer: None,
                     timestamp: Instant::now(),
                 };
 
@@ -158,7 +160,9 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resolut
 
                     let frame = VideoFrame {
                         width: out_w, height: out_h,
-                        data: Arc::new(data),
+                        data: Some(Arc::new(data)),
+                        #[cfg(target_os = "macos")]
+                        pixel_buffer: None,
                         timestamp: Instant::now(),
                     };
 

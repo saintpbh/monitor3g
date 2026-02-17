@@ -131,6 +131,12 @@ fn main() {
         .file("src/capture/camera_delegate.m")
         .flag("-fobjc-arc")
         .compile("camera_delegate");
+
+    // Compile virtual_display.m (CGVirtualDisplay bridge)
+    cc::Build::new()
+        .file("src/capture/virtual_display.m")
+        .flag("-fobjc-arc")
+        .compile("virtual_display");
         
     // Bindgen for DeckLink
     let output_path = PathBuf::from(env::var("OUT_DIR").unwrap());
