@@ -25,6 +25,8 @@ struct SourceState {
     ndi_sources: Vec<String>,
     active_stop: Option<StopSignal>,
     virtual_display: Option<capture::VirtualDisplay>,
+    decklink_input: Option<output::decklink_input::DeckLinkInput>,
+    monitor_rx: Option<std::sync::mpsc::Receiver<core::VideoFrame>>,
 }
 
 #[tokio::main]
@@ -68,6 +70,8 @@ async fn main() -> Result<(), slint::PlatformError> {
         ndi_sources: Vec::new(),
         active_stop: None,
         virtual_display: None,
+        decklink_input: None,
+        monitor_rx: None,
     }));
 
     // Frame channel — buffer for dual-output stability (NDI + DeckLink)
@@ -354,19 +358,53 @@ async fn main() -> Result<(), slint::PlatformError> {
                 println!("[VirtualScreen] OFF — Virtual display removed");
             }
         }
+        else if output_type == "DeckLinkMonitor" {
+            let mut ss = match ss_toggle.lock() {
+                Ok(g) => g,
+                Err(p) => { eprintln!("[UI] Mutex poisoned, recovering"); p.into_inner() }
+            };
+
+            if state {
+                // Find and start DeckLink input capture
+                use crate::output::decklink::{DeckLinkManager};
+                let devices = DeckLinkManager::enumerate_devices();
+                if let Some(dev) = devices.into_iter().next() {
+                    match output::decklink_input::DeckLinkInput::start(&dev) {
+                        Some((input, rx)) => {
+                            println!("[DeckLink Monitor] ON — Monitoring started");
+                            ss.decklink_input = Some(input);
+                            ss.monitor_rx = Some(rx);
+                        }
+                        None => {
+                            eprintln!("[DeckLink Monitor] Failed to start input capture");
+                        }
+                    }
+                } else {
+                    eprintln!("[DeckLink Monitor] No DeckLink device found");
+                }
+            } else {
+                // Stop DeckLink input capture
+                ss.decklink_input = None; // Drop stops streams
+                ss.monitor_rx = None;
+                println!("[DeckLink Monitor] OFF");
+            }
+        }
 
         if let Some(ui) = ui_handle4.upgrade() {
             let ndi_s = if output_state_ui.is_ndi_enabled() { "ON" } else { "OFF" };
             let dl_s = if output_state_ui.is_decklink_enabled() { "ON" } else { "OFF" };
-            let vs_s = {
+            let (vs_s, mon_s) = {
                 let ss = match ss_toggle.lock() {
                     Ok(g) => g,
                     Err(p) => p.into_inner()
                 };
-                if ss.virtual_display.is_some() { "ON" } else { "OFF" }
+                (
+                    if ss.virtual_display.is_some() { "ON" } else { "OFF" },
+                    if ss.decklink_input.is_some() { "ON" } else { "OFF" },
+                )
             };
             ui.set_source_details(slint::SharedString::from(
-                format!("NDI: {} | DeckLink: {} | VScreen: {}", ndi_s, dl_s, vs_s)
+                format!("NDI:{} DL:{} VS:{} Mon:{}", ndi_s, dl_s, vs_s, mon_s)
             ));
         }
     });

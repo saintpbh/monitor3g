@@ -250,6 +250,31 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+
+                // DeckLink Monitor toggle (모니터링)
+                HorizontalBox {
+                    spacing: 6px;
+                    Text {
+                        text: "DL Monitor";
+                        color: #dd8855;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+
+                    Button {
+                        text: "OFF";
+                        clicked => {
+                            if (self.text == "OFF") {
+                                self.text = "ON";
+                                root.toggle-output("DeckLinkMonitor", true);
+                            } else {
+                                self.text = "OFF";
+                                root.toggle-output("DeckLinkMonitor", false);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
