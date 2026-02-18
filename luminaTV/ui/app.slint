@@ -7,6 +7,7 @@ import {
     ScrollView,
     StandardTableView,
     GroupBox,
+    LineEdit,
 } from "std-widgets.slint";
 
 component LayerButton inherits Rectangle {
@@ -116,6 +117,8 @@ export component AppWindow inherits Window {
     callback select-output-resolution(int);
     callback set-key-param(string, int);
     callback toggled-layer-key(int, bool);
+    callback save-preset(string);
+    callback load-preset(string);
 
     // Properties
     in-out property <int> selected-layer: 0;
@@ -135,6 +138,8 @@ export component AppWindow inherits Window {
         "SD (640x480)",
         "Native"
     ];
+    in-out property <[string]> preset-list: [];
+    in-out property <string> preset-name-input: "";
     in-out property <bool> show-settings: false;
 
     HorizontalLayout {
@@ -715,6 +720,74 @@ export component AppWindow inherits Window {
                                 selected(idx) => {
                                     root.select-output-resolution(self.current-index);
                                 }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: #444455;
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+                    SectionHeader {
+                        text: "PROJECT / PRESETS";
+                    }
+
+                    // Load
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ControlLabel {
+                            text: "Load:";
+                            width: 40px;
+                        }
+
+                        ComboBox {
+                            model: root.preset-list;
+                            height: 30px;
+                            horizontal-stretch: 1;
+                            selected(idx) => {
+                                // Just select, wait for button
+                                root.preset-name-input = self.current-value;
+                            }
+                        }
+
+                        Button {
+                            text: "Load";
+                            width: 60px;
+                            height: 30px;
+                            clicked => {
+                                root.load-preset(root.preset-name-input);
+                            }
+                        }
+                    }
+
+                    // Save
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ControlLabel {
+                            text: "Save:";
+                            width: 40px;
+                        }
+
+                        LineEdit {
+                            text: root.preset-name-input;
+                            placeholder-text: "Enter Preset Name";
+                            height: 30px;
+                            horizontal-stretch: 1;
+                            edited(txt) => {
+                                root.preset-name-input = txt;
+                            }
+                        }
+
+                        Button {
+                            text: "Save";
+                            width: 60px;
+                            height: 30px;
+                            clicked => {
+                                root.save-preset(root.preset-name-input);
                             }
                         }
                     }

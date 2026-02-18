@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use crate::core::{StopSignal, ResolutionState, RESOLUTION_PRESETS};
+use crate::core::config;
 use slint::Model;
 
 slint::include_modules!();
@@ -498,21 +499,68 @@ async fn main() -> Result<(), slint::PlatformError> {
          } else if output_type == "DeckLinkMonitor" {
              // Monitor logic (same as before)
              let mut ss = match ss_toggle.lock() { Ok(g)=>g, Err(p)=>p.into_inner() };
-              if state {
-                use crate::output::decklink::{DeckLinkManager};
-                let devices = DeckLinkManager::enumerate_devices();
-                if let Some(dev) = devices.into_iter().next() {
-                    match output::decklink_input::DeckLinkInput::start(&dev) {
-                        Some((input, rx)) => {
-                            ss.decklink_input = Some(input);
-                            ss.monitor_rx = Some(rx);
-                        }
-                        None => {}
-                    }
-                }
+             if state {
+                 use crate::output::decklink::{DeckLinkManager};
+                 let devices = DeckLinkManager::enumerate_devices();
+                 if let Some(dev) = devices.into_iter().next() {
+                     match output::decklink_input::DeckLinkInput::start(&dev) {
+                         Some((input, mut rx)) => {
+                             ss.decklink_input = Some(input);
+                             // Passthrough Logic: Route rx to Layer 0
+                             // 1. Stop existing Layer 0 capture
+                             if let Some(ref stop) = ss.layers[0].active_stop { stop.stop(); }
+                             
+                             // 2. Clone Layer 0 TX
+                             if let Some(layer0_tx) = ss.layers[0].tx.clone() {
+                                 // 3. Spawn forwarding task (std::thread for blocking rx)
+                                 let stop_signal = crate::core::StopSignal::new();
+                                 let stop_signal_clone = stop_signal.clone();
+                                 ss.layers[0].active_stop = Some(stop_signal);
+                                 ss.layers[0].current_source_name = "DeckLink Input".to_string();
+                                 ss.layers[0].current_type = "DeckLink".to_string();
+                                 
+                                 // Update UI Name
+                                 if let Some(ui) = ui_handle_toggle.upgrade() {
+                                     ui.set_source_name(slint::SharedString::from("DeckLink Input"));
+                                 }
+                                 
+                                 std::thread::spawn(move || {
+                                     println!("[DeckLink] Started Passthrough to Layer 0");
+                                     loop {
+                                        if stop_signal_clone.is_stopped() {
+                                            println!("[DeckLink] Passthrough Stopped via Signal");
+                                            break;
+                                        }
+
+                                        // Use recv_timeout to check stop signal
+                                        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                                            Ok(frame) => {
+                                                if layer0_tx.blocking_send(frame).is_err() { break; }
+                                            }
+                                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => { continue; }
+                                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => { break; }
+                                        }
+                                     }
+                                 });
+                             }
+                         }
+                         None => {}
+                     }
+                 }
              } else {
+                 // Stop Passthrough (Layer 0)
+                 if let Some(ref stop) = ss.layers[0].active_stop { 
+                     // Only stop if it's DeckLink
+                     if ss.layers[0].current_type == "DeckLink" {
+                         stop.stop(); 
+                         ss.layers[0].active_stop = None;
+                         ss.layers[0].current_source_name = "None".to_string();
+                         if let Some(ui) = ui_handle_toggle.upgrade() {
+                             ui.set_source_name(slint::SharedString::from("None"));
+                         }
+                     }
+                 }
                  ss.decklink_input = None;
-                 ss.monitor_rx = None;
              }
          }
     });
@@ -691,5 +739,337 @@ async fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // === Persistence Callbacks ===
+    
+    // Refresh Presets List Helper
+    let ui_presets = ui.as_weak();
+    let refresh_presets = move || {
+        let list = config::ConfigManager::list_presets();
+        let mut slint_list = Vec::new();
+        for name in list {
+            slint_list.push(slint::SharedString::from(name));
+        }
+        if let Some(ui) = ui_presets.upgrade() {
+            let model = std::rc::Rc::new(slint::VecModel::from(slint_list));
+            ui.set_preset_list(slint::ModelRc::from(model));
+        }
+    };
+    refresh_presets(); // Initial load
+
+    let ui_save = ui.as_weak();
+    let ss_save = source_state.clone();
+    let res_save = res_state.clone();
+    let key_save = key_state.clone();
+    let refresh_presets_clone = refresh_presets.clone();
+    
+    let key_enables_save = layer_key_enables_ui.clone();
+
+    ui.on_save_preset(move |name_str| {
+        let name = name_str.as_str();
+        if name.trim().is_empty() { return; }
+        
+
+        let ss_save = ss_save.clone();
+        let res_save = res_save.clone();
+        let key_save = key_save.clone();
+        let refresh_presets_clone = refresh_presets_clone.clone();
+        let key_enables_save: Vec<Arc<AtomicBool>> = key_enables_save.clone();
+        let name_owned = name.to_string();
+
+        tokio::spawn(async move {
+            println!("[Persistence] Saving preset: {}", name_owned);
+            
+            let ss = ss_save.lock().unwrap();
+            let (width, height) = res_save.input();
+
+
+
+
+
+
+
+            
+            let mut layers_cfg = Vec::new();
+            
+            for (i, layer) in ss.layers.iter().enumerate() {
+                let key_enabled = if i < key_enables_save.len() {
+                    let arc: &std::sync::Arc<std::sync::atomic::AtomicBool> = &key_enables_save[i];
+                    std::sync::atomic::AtomicBool::load(arc, std::sync::atomic::Ordering::Relaxed)
+                } else { false };
+                
+                let params = config::KeyParamsConfig {
+                    color_u32: key_save.key_color.load(Ordering::Relaxed),
+                    tolerance: key_save.tolerance.load(Ordering::Relaxed),
+                    softness: key_save.softness.load(Ordering::Relaxed),
+                    luma_low: key_save.luma_low.load(Ordering::Relaxed),
+                    luma_softness: key_save.luma_softness.load(Ordering::Relaxed),
+                    spill: key_save.spill_suppress.load(Ordering::Relaxed),
+                    smoothing: key_save.smoothing.load(Ordering::Relaxed),
+                };
+    
+                layers_cfg.push(config::LayerConfig {
+                    source_type: layer.current_type.clone(),
+                    source_name: layer.current_source_name.clone(),
+                    input_device_id: None, 
+                    key_enabled,
+                    key_params: params,
+                });
+            }
+    
+            let config = config::AppConfig {
+                resolution: config::ResolutionConfig {
+                    width,
+                    height,
+                    label: "Custom".to_string(),
+                },
+                layers: layers_cfg,
+                decklink_monitor_enabled: false,
+                ndi_output_enabled: false,
+                decklink_output_enabled: false,
+                virtual_display_enabled: false,
+            };
+    
+            if let Err(e) = config::ConfigManager::save_preset(&name_owned, &config) {
+                eprintln!("[Persistence] Error saving preset: {}", e);
+            } else {
+                refresh_presets_clone();
+            }
+        });
+    });
+
+    let ui_load = ui.as_weak();
+    let ss_load = source_state.clone();
+    let res_load = res_state.clone();
+    let key_load = key_state.clone();
+    let layer_key_enables_load = layer_key_enables_ui.clone();
+
+    // Helper to apply config (Shared logic for Load Preset & Startup)
+    let apply_config = move |config: config::AppConfig, 
+                             ss: Arc<std::sync::Mutex<SourceState>>, 
+                             res: core::ResolutionState,
+                             key: core::key_state::KeyState,
+                             ui_handle: slint::Weak<AppWindow>,
+                             key_enables: Vec<Arc<AtomicBool>>| {
+        tokio::spawn(async move {
+            println!("[Persistence] Applying configuration...");
+            
+            // 1. Set Resolution
+            {
+                res.set_input(config.resolution.width, config.resolution.height);
+                // Also set output?
+                res.set_output(config.resolution.width, config.resolution.height);
+
+                // Find matching preset index?
+                if let Some(ui) = ui_handle.upgrade() {
+                    // Update UI combobox if possible, or just set internal state
+                    // We can't easily sync "index" without searching list. 
+                    // For now, internal state is what matters for captures.
+                }
+            }
+            
+            // 2. Refresh Sources to get IDs
+            println!("[Persistence] Listing sources to match IDs...");
+            let (displays, windows) = capture::list_sources();
+            let cameras = capture::camera::list_cameras();
+            
+            let mut ss_lock = ss.lock().unwrap();
+
+            
+            // 3. Apply Layers
+            for (i, layer_cfg) in config.layers.iter().enumerate() {
+                if i >= 5 { break; }
+                
+                // Stop current
+                // We need to implement stop_layer logic here or refactor?
+                // `start_capture` logic handles stopping previous if we replace it.
+                // But we should clean up first.
+                if let Some(ref stop) = ss_lock.layers[i].active_stop { stop.stop(); }
+                ss_lock.layers[i].active_stop = None;
+                
+                ss_lock.layers[i].current_type = layer_cfg.source_type.clone();
+                ss_lock.layers[i].current_source_name = layer_cfg.source_name.clone();
+                
+                // Key Enable
+                if i < key_enables.len() {
+                    key_enables[i].store(layer_cfg.key_enabled, Ordering::Relaxed);
+                }
+                
+                // Restore Key Params (from first layer that has them, or just apply all?)
+                // Since runtime is global, last one wins.
+                // ideally we only apply if this is the selected layer?
+                // For now, apply from layer 0 (Background) or just the last valid one.
+                if i == 0 { // Apply once from L0
+                    key.key_color.store(layer_cfg.key_params.color_u32, Ordering::Relaxed);
+                    key.tolerance.store(layer_cfg.key_params.tolerance, Ordering::Relaxed);
+                    key.softness.store(layer_cfg.key_params.softness, Ordering::Relaxed);
+                    key.luma_low.store(layer_cfg.key_params.luma_low, Ordering::Relaxed);
+                    key.smoothing.store(layer_cfg.key_params.smoothing, Ordering::Relaxed);
+                }
+
+                if layer_cfg.source_type == "None" { continue; }
+                
+                // Find Source ID
+
+                let mut new_stop = None;
+                
+                // We need the TX for this layer
+                // ss.layers[i].tx is Option<Sender>
+                // We need to clone it.
+                if let Some(tx) = ss_lock.layers[i].tx.clone() {
+                    let res_clone = res.clone(); // Arc<Mutex>
+                    
+                    if layer_cfg.source_type == "Screen" {
+                        if let Some(d) = displays.iter().find(|d| d.name == layer_cfg.source_name) {
+                             println!("[Persistence] L{} restoring Screen: {}", i, d.name);
+                             new_stop = Some(capture::capture_display(d.id, tx, res_clone));
+                        }
+                    } else if layer_cfg.source_type == "Window" || layer_cfg.source_type == "Presentation" {
+                        if let Some(w) = windows.iter().find(|w| w.name == layer_cfg.source_name) {
+                             println!("[Persistence] L{} restoring Window: {}", i, w.name);
+                             new_stop = Some(capture::capture_window(w.id, tx, res_clone));
+                        }
+                    } else if layer_cfg.source_type == "Camera" {
+                         if let Some((idx, name)) = cameras.iter().find(|(_, name)| name == &layer_cfg.source_name) {
+                              println!("[Persistence] L{} restoring Camera: {}", i, name);
+                              new_stop = Some(capture::camera::start_camera(*idx, tx, res_clone));
+                         }
+                    }
+                }
+                
+                ss_lock.layers[i].active_stop = new_stop;
+            }
+            
+            // 4. Update UI
+            if let Some(ui) = ui_handle.upgrade() {
+                 println!("[Persistence] Updating UI state...");
+                 // Update Layer Active indicators
+                 let mut active_flags = Vec::new();
+                 for layer in &ss_lock.layers {
+                     active_flags.push(layer.current_type != "None");
+                 }
+                 ui.set_layer_active(slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(active_flags))));
+                 
+                 // Update Key Enables
+                 let mut key_flags = Vec::new();
+                 for k in &key_enables { key_flags.push(k.load(Ordering::Relaxed)); }
+                 ui.set_layer_key_enabled(slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(key_flags))));
+                 
+                 // Update Selected Source Info for *current* selected layer
+                 let sel = ss_lock.selected_layer_idx;
+                 ui.set_selected_source_type(slint::SharedString::from(ss_lock.layers[sel].current_type.as_str()));
+                 ui.set_source_name(slint::SharedString::from(ss_lock.layers[sel].current_source_name.as_str()));
+            }
+        });
+    };
+
+    let apply_config_load = apply_config.clone();
+    
+    ui.on_load_preset(move |name_str| {
+        let name = name_str.as_str();
+        if let Some(config) = config::ConfigManager::load_preset(name) {
+             apply_config_load(
+                 config, 
+                 ss_load.clone(), // Arc<Mutex<SourceState>>
+                 res_load.clone(), 
+                 key_load.clone(), 
+                 ui_load.clone(),
+                 layer_key_enables_load.clone()
+             );
+        } else {
+             eprintln!("[Persistence] Preset not found: {}", name);
+        }
+    });
+    
+    // Auto-Restore Last Session
+    if let Some(last_config) = config::ConfigManager::load_last_session() {
+         println!("[Persistence] Restoring last session...");
+         let startup_ui = ui.as_weak();
+         let startup_ss = source_state.clone();
+         let startup_res = res_state.clone();
+         let startup_key = key_state.clone();
+         let startup_keys = layer_key_enables_ui.clone();
+         
+         apply_config(
+             last_config,
+             startup_ss,
+             startup_res,
+             startup_key,
+             startup_ui,
+             startup_keys
+         );
+    }
+    
+    // Auto-Save on Exit is hard to hook in pure main() without signal handling
+    // We will hook Save Last Session into the "Save Preset" or periodic?
+    // User requested "App off/on -> restore".
+    // I'll add a periodic auto-save of "last_session" every 10 seconds?
+    // Or just save "last_session" whenever "save_preset" is called?
+    // The user implicitly expects "Save Settings" to be the state.
+    // But if they just change things and close, they expect it to match.
+    // I'll add a periodic auto-save of "last_session".
+    
+    let ss_autosave = source_state.clone();
+    let res_autosave = res_state.clone();
+    let key_autosave = key_state.clone();
+    // We need key enables too
+    let key_enables_autosave: Vec<Arc<AtomicBool>> = layer_key_enables_ui.clone();
+    
+    tokio::spawn(async move {
+        println!("[Persistence] Auto-save service started.");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            // Build config
+            let ss = ss_autosave.lock().unwrap();
+            
+            let (width, height) = res_autosave.input();
+
+
+            
+            let mut layers_cfg = Vec::new();
+            
+            for (i, layer) in ss.layers.iter().enumerate() {
+                let key_enabled = if i < key_enables_autosave.len() {
+                    let arc: &std::sync::Arc<std::sync::atomic::AtomicBool> = &key_enables_autosave[i];
+                    std::sync::atomic::AtomicBool::load(arc, std::sync::atomic::Ordering::Relaxed)
+                } else { false };
+                
+                let params = config::KeyParamsConfig {
+                    color_u32: key_autosave.key_color.load(Ordering::Relaxed),
+                    tolerance: key_autosave.tolerance.load(Ordering::Relaxed),
+                    softness: key_autosave.softness.load(Ordering::Relaxed),
+                    luma_low: key_autosave.luma_low.load(Ordering::Relaxed),
+                    luma_softness: key_autosave.luma_softness.load(Ordering::Relaxed),
+                    spill: key_autosave.spill_suppress.load(Ordering::Relaxed),
+                    smoothing: key_autosave.smoothing.load(Ordering::Relaxed),
+                };
+
+                layers_cfg.push(config::LayerConfig {
+                    source_type: layer.current_type.clone(),
+                    source_name: layer.current_source_name.clone(),
+                    input_device_id: None, 
+                    key_enabled,
+                    key_params: params,
+                });
+            }
+
+            let config = config::AppConfig {
+                resolution: config::ResolutionConfig {
+                    width,
+                    height,
+                    label: "Custom".to_string(),
+                },
+                layers: layers_cfg,
+                decklink_monitor_enabled: false,
+                ndi_output_enabled: false,
+                decklink_output_enabled: false,
+                virtual_display_enabled: false,
+            };
+            
+            // Save to last_session
+            if let Err(e) = config::ConfigManager::save_last_session(&config) {
+                eprintln!("[Persistence] Auto-save failed: {}", e);
+            }
+        }
+    });
     ui.run()
 }

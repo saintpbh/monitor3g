@@ -17,6 +17,9 @@ slint = "1.9.1"
 image = "0.25" # Match nokhwa's image version likely
 
 screencapturekit = { version = "1.5", features = ["async"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "6.0"
 
 
 # Mac AVFoundation (Phase 8) - Reverted to 0.6.3

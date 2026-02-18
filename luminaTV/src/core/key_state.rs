@@ -24,21 +24,21 @@ pub fn unpack_rgb(packed: u32) -> (u8, u8, u8) {
 #[derive(Clone)]
 pub struct KeyState {
     /// Master enable
-    enabled: Arc<AtomicBool>,
+    pub enabled: Arc<AtomicBool>,
     /// Key color as packed RGB (default: 0x00B140 = TV green)
-    key_color: Arc<AtomicU32>,
+    pub key_color: Arc<AtomicU32>,
     /// Color distance tolerance (0–200, default: 80)
-    tolerance: Arc<AtomicU32>,
+    pub tolerance: Arc<AtomicU32>,
     /// Edge softness (0–100, default: 30)
-    softness: Arc<AtomicU32>,
+    pub softness: Arc<AtomicU32>,
     /// Luma low threshold (0–255, default: 16)
-    luma_low: Arc<AtomicU32>,
+    pub luma_low: Arc<AtomicU32>,
     /// Luma softness (0–100, default: 10)
-    luma_softness: Arc<AtomicU32>,
+    pub luma_softness: Arc<AtomicU32>,
     /// Spill suppression enabled
-    spill_suppress: Arc<AtomicBool>,
+    pub spill_suppress: Arc<AtomicBool>,
     /// Temporal smoothing (0-100, default: 0) to reduce flicker
-    smoothing: Arc<AtomicU32>,
+    pub smoothing: Arc<AtomicU32>,
 }
 
 impl KeyState {
