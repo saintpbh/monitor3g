@@ -47,11 +47,11 @@ impl KeyState {
             enabled: Arc::new(AtomicBool::new(false)),
             key_color: Arc::new(AtomicU32::new(pack_rgb(0x00, 0xB1, 0x40))), // TV green
             tolerance: Arc::new(AtomicU32::new(80)),
-            softness: Arc::new(AtomicU32::new(30)),
-            luma_low: Arc::new(AtomicU32::new(16)),
+            softness: Arc::new(AtomicU32::new(50)),
+            luma_low: Arc::new(AtomicU32::new(8)),
             luma_softness: Arc::new(AtomicU32::new(10)),
             spill_suppress: Arc::new(AtomicBool::new(true)),
-            smoothing: Arc::new(AtomicU32::new(0)),
+            smoothing: Arc::new(AtomicU32::new(10)),
         }
     }
 
