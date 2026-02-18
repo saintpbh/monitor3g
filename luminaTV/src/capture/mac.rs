@@ -206,10 +206,12 @@ impl SCStreamOutputTrait for DisplayCaptureHandler {
     }
 }
 
+// Duplicate capture_display implementation
 pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: ResolutionState) -> StopSignal {
     let stop = StopSignal::new();
     let stop_clone = stop.clone();
     let stop_for_handler = stop.clone();
+    let tx_for_exit = tx.clone(); // Clone for sending clear frame
 
     println!("[SCK] Starting display capture: ID {}", display_id);
 
@@ -224,13 +226,32 @@ pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resol
             None => { eprintln!("[SCK] Display {} not found", display_id); return; }
         };
 
+        // EXCLUDE SELF (Recursion Fix)
+        let current_pid = std::process::id();
+        let excluded_windows: Vec<SCWindow> = content.windows().iter()
+            .filter(|w| {
+                if let Some(app) = w.owning_application() {
+                    return app.process_id() == current_pid as i32;
+                }
+                false
+            })
+            .cloned()
+            .collect();
+            
+        if !excluded_windows.is_empty() {
+            println!("[SCK] Excluding {} window(s) to prevent feedback loop.", excluded_windows.len());
+        }
+        
+        // Convert to slice of references for API
+        let excluded_refs: Vec<&SCWindow> = excluded_windows.iter().collect();
+
         // OS does GPU scaling to target resolution!
         let (tw, th) = res.input();
         let (cap_w, cap_h) = if tw > 0 && th > 0 { (tw, th) } else { (display.width(), display.height()) };
 
         let filter = SCContentFilter::create()
             .with_display(&display)
-            .with_excluding_windows(&[])
+            .with_excluding_windows(&excluded_refs)
             .build();
 
         let config = SCStreamConfiguration::new()
@@ -260,6 +281,14 @@ pub fn capture_display(display_id: u32, tx: mpsc::Sender<VideoFrame>, res: Resol
 
         let _ = stream.stop_capture();
         println!("[SCK] Display capture stopped.");
+        
+        // Critical Fix: Send Clear Frame AFTER fully stopping content
+        let _ = tx_for_exit.try_send(VideoFrame {
+             width: 0, height: 0, 
+             data: None, 
+             #[cfg(target_os = "macos")] pixel_buffer: None, 
+             timestamp: Instant::now() 
+        });
     });
 
     stop
@@ -311,6 +340,7 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, _res: Resolu
     let stop = StopSignal::new();
     let stop_clone = stop.clone();
     let stop_for_handler = stop.clone();
+    let tx_for_exit = tx.clone(); // Added missing clone
 
     println!("[SCK] Starting window capture: ID {}", window_id);
 
@@ -382,6 +412,14 @@ pub fn capture_window(window_id: u32, tx: mpsc::Sender<VideoFrame>, _res: Resolu
 
         let _ = stream.stop_capture();
         println!("[SCK] Window capture stopped.");
+
+        // Critical Fix: Send Clear Frame AFTER fully stopping content
+        let _ = tx_for_exit.try_send(VideoFrame {
+             width: 0, height: 0, 
+             data: None, 
+             #[cfg(target_os = "macos")] pixel_buffer: None, 
+             timestamp: Instant::now() 
+        });
     });
 
     stop

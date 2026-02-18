@@ -1,6 +1,9 @@
 // Core module: Compositor and main application logic
 pub mod compositor;
 pub mod output_state;
+pub mod key_state;
+pub mod hybrid_key;
+pub mod blender;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

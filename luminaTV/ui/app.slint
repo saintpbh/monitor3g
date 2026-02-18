@@ -3,28 +3,130 @@ import {
     VerticalBox,
     HorizontalBox,
     ComboBox,
+    Slider,
+    ScrollView,
+    StandardTableView,
+    GroupBox,
 } from "std-widgets.slint";
+
+component LayerButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> active; // e.g. has source
+    in property <color> indicator-color: gray;
+    in property <bool> key-enabled;
+    callback clicked;
+    callback toggled-key(bool);
+
+    width: 100%;
+    height: 36px;
+    border-radius: 6px;
+    background: selected ? #444466 : (touch.pressed ? #333344 : #2a2a3a);
+    border-width: selected ? 1px : 0px;
+    border-color: #7777aa;
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 8px;
+        alignment: start;
+        
+        // Status Indicator
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: root.indicator-color;
+            y: (parent.height - self.height) / 2;
+        }
+
+        Text {
+            text: root.text;
+            color: root.selected ? #ffffff : #cccccc;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        // Spacer
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        // Key Toggle
+        Rectangle {
+            width: 40px;
+            height: 20px;
+            border-radius: 10px;
+            background: root.key-enabled ? #55ffaa : #444455;
+            border-width: 1px;
+            border-color: #666677;
+
+            Text {
+                text: root.key-enabled ? "KEY" : "OFF";
+                color: root.key-enabled ? #000000 : #aaaaaa;
+                font-size: 9px;
+                font-weight: 700;
+                x: 0;
+                width: 100%;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                clicked => {
+                    root.toggled-key(!root.key-enabled);
+                }
+            }
+        }
+    }
+}
+
+component SectionHeader inherits Text {
+    color: #aaccff;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+component ControlLabel inherits Text {
+    color: #8888aa;
+    font-size: 11px;
+    vertical-alignment: center;
+}
 
 export component AppWindow inherits Window {
     title: "LuminaTV Monitor";
-    width: 960px;
-    height: 740px;
+    // width: 1200px; // Removed fixed size
+    // height: 800px; // Removed fixed size
+    min-width: 1024px;
+    min-height: 768px;
     background: #1a1a2e;
 
     // Callbacks
+    callback select-layer(int);
     callback select-source-type(string);
     callback select-device(int);
     callback toggle-output(string, bool);
     callback refresh-sources();
     callback select-input-resolution(int);
     callback select-output-resolution(int);
+    callback set-key-param(string, int);
+    callback toggled-layer-key(int, bool);
 
     // Properties
+    in-out property <int> selected-layer: 0;
+    in-out property <string> selected-source-type: "Screen";
     in-out property <string> source-name: "No Source";
     in-out property <string> source-details: "";
     in-out property <image> preview-image;
-    in-out property <[string]> source-type-list: ["Screen", "Window", "Camera", "NDI", "Presentation"];
+    in-out property <[string]> source-type-list: ["Screen", "Window", "Camera", "NDI", "Presentation", "None"];
     in-out property <[string]> device-list: [];
+    in-out property <[bool]> layer-active: [true, false, false, false, false]; // Default L1 active
+    in-out property <[bool]> layer-key-enabled: [false, false, false, false, false];
     in-out property <[string]> resolution-list: [
         "4K UHD (3840x2160)",
         "QHD (2560x1440)",
@@ -34,245 +136,518 @@ export component AppWindow inherits Window {
         "Native"
     ];
 
-    VerticalBox {
-        padding: 12px;
-        spacing: 8px;
-
-        // Header
-        Text {
-            text: "LuminaTV Monitor";
-            font-size: 20px;
-            font-weight: 700;
-            color: #e0e0ff;
-            horizontal-alignment: center;
-        }
-
-        // Preview area
+    HorizontalLayout {
+        // === LEFT SIDEBAR: CONTROLS ===
         Rectangle {
-            background: #000000;
-            border-color: #333355;
-            border-width: 2px;
-            border-radius: 8px;
-            min-height: 360px;
+            width: 340px;
+            background: #222233;
+            // border-right: 1px solid #333344;
+            
+            ScrollView {
+                viewport-height: 850px; // Ensure enough scrolling space
+                width: 100%;
+                height: 100%;
 
-            Image {
-                source: root.preview-image;
-                width: parent.width - 4px;
-                height: parent.height - 4px;
-                image-fit: contain;
-            }
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 16px;
+                    alignment: start;
 
-            if root.preview-image.width == 0: Text {
-                text: "NO SIGNAL";
-                color: #333355;
-                font-size: 48px;
-                font-weight: 700;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                    // 0. Header
+                Text {
+                        text: "LUMINA TV";
+                        font-size: 24px;
+                        font-weight: 900;
+                        color: #ffffff;
+                        horizontal-alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: #333344;
+                    }
+
+                    // 1. Screen Selection (Canvas)
+                VerticalLayout {
+                        spacing: 6px;
+                        SectionHeader {
+                            text: "1. CANVAS / SCREEN";
+                        }
+
+                        ComboBox {
+                            model: ["Main Display", "Virtual Screen"];
+                            current-value: "Main Display";
+                        }
+                    }
+
+                    // 2. Layer Selection
+                VerticalLayout {
+                        spacing: 6px;
+                        SectionHeader {
+                            text: "2. LAYER SELECTION";
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                        // Layer 1 (BG)
+                        LayerButton {
+                                text: "Layer 1 (Background)";
+                                selected: root.selected-layer == 0;
+                                indicator-color: root.layer-active[0] ? #55ffaa : #ff5555;
+                                key-enabled: root.layer-key-enabled[0];
+                                toggled-key(en) => {
+                                    root.toggled-layer-key(0, en);
+                                }
+                                clicked => {
+                                    root.select-layer(0);
+                                    root.selected-layer = 0;
+                                }
+                            }
+                        // Layer 2
+                        LayerButton {
+                                text: "Layer 2";
+                                selected: root.selected-layer == 1;
+                                indicator-color: root.layer-active[1] ? #55ffaa : #ff5555;
+                                key-enabled: root.layer-key-enabled[1];
+                                toggled-key(en) => {
+                                    root.toggled-layer-key(1, en);
+                                }
+                                clicked => {
+                                    root.select-layer(1);
+                                    root.selected-layer = 1;
+                                }
+                            }
+                        // Layer 3
+                        LayerButton {
+                                text: "Layer 3";
+                                selected: root.selected-layer == 2;
+                                indicator-color: root.layer-active[2] ? #55ffaa : #ff5555;
+                                key-enabled: root.layer-key-enabled[2];
+                                toggled-key(en) => {
+                                    root.toggled-layer-key(2, en);
+                                }
+                                clicked => {
+                                    root.select-layer(2);
+                                    root.selected-layer = 2;
+                                }
+                            }
+                        // Layer 4
+                        LayerButton {
+                                text: "Layer 4";
+                                selected: root.selected-layer == 3;
+                                indicator-color: root.layer-active[3] ? #55ffaa : #ff5555;
+                                key-enabled: root.layer-key-enabled[3];
+                                toggled-key(en) => {
+                                    root.toggled-layer-key(3, en);
+                                }
+                                clicked => {
+                                    root.select-layer(3);
+                                    root.selected-layer = 3;
+                                }
+                            }
+                        // Layer 5
+                        LayerButton {
+                                text: "Layer 5 (Top)";
+                                selected: root.selected-layer == 4;
+                                indicator-color: root.layer-active[4] ? #55ffaa : #ff5555;
+                                key-enabled: root.layer-key-enabled[4];
+                                toggled-key(en) => {
+                                    root.toggled-layer-key(4, en);
+                                }
+                                clicked => {
+                                    root.select-layer(4);
+                                    root.selected-layer = 4;
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Source Configuration (Contextual)
+                Rectangle {
+                        background: #2a2a3a;
+                        border-radius: 8px;
+                        clip: true;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 10px;
+
+                            SectionHeader {
+                                text: "3. SOURCE CONFIG (L" + (root.selected-layer + 1) + ")";
+                            }
+
+                            // Type
+                        VerticalLayout {
+                                spacing: 4px;
+                                ControlLabel {
+                                    text: "Source Type";
+                                }
+
+                                ComboBox {
+                                    model: root.source-type-list;
+                                    current-value: root.selected-source-type;
+                                    selected(val) => {
+                                        root.selected-source-type = val;
+                                        root.select-source-type(val);
+                                    }
+                                }
+                            }
+
+                            // Device
+                        VerticalLayout {
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    ControlLabel {
+                                        text: "Select Device / Input";
+                                    }
+
+                                    Rectangle {
+                                        width: 10px;
+                                    }
+
+                                    Button {
+                                        text: "Refresh";
+                                        height: 20px;
+                                        clicked => {
+                                            root.refresh-sources();
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "↻";
+                                        width: 24px;
+                                        height: 18px;
+                                        clicked => {
+                                            root.refresh-sources();
+                                        }
+                                    }
+                                }
+
+                                ComboBox {
+                                    model: root.device-list;
+                                    selected(val) => {
+                                        root.select-device(self.current-index);
+                                    }
+                                }
+                            }
+
+                            // Info Display
+                        Text {
+                                text: root.source-name;
+                                color: #88ccff;
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    // 4. Keying & Effects
+                Rectangle {
+                        background: #2a2a3a;
+                        border-radius: 8px;
+                        clip: true;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+                            HorizontalLayout {
+                                alignment: space-between;
+                                SectionHeader {
+                                    text: "KEYING & EFFECTS";
+                                }
+                             // Master Toggle
+                             Button {
+                                    text: "KEY: OFF";
+                                    clicked => {
+                                        if (self.text == "KEY: OFF") {
+                                            self.text = "KEY: ON";
+                                            root.toggle-output("HybridKey", true);
+                                        } else {
+                                            self.text = "KEY: OFF";
+                                            root.toggle-output("HybridKey", false);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Key Color
+                        HorizontalLayout {
+                                spacing: 8px;
+                                ControlLabel {
+                                    text: "Color:";
+                                    vertical-alignment: center;
+                                }
+
+                                Button {
+                                    text: "Green";
+                                    clicked => {
+                                        if (self.text == "Green") {
+                                            self.text = "Blue";
+                                            root.set-key-param("color-blue", 0);
+                                        } else {
+                                            self.text = "Green";
+                                            root.set-key-param("color-green", 0);
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    text: "Despill: ON";
+                                    clicked => {
+                                        if (self.text == "Despill: ON") {
+                                            self.text = "Despill: OFF";
+                                            root.set-key-param("spill", 0);
+                                        } else {
+                                            self.text = "Despill: ON";
+                                            root.set-key-param("spill", 1);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Sliders
+                        VerticalLayout {
+                                spacing: 4px;
+                                ControlLabel {
+                                    text: "Tolerance";
+                                }
+
+                                Slider {
+                                    minimum: 0;
+                                    maximum: 200;
+                                    value: 80;
+                                    changed(v) => {
+                                        root.set-key-param("tolerance", v);
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                ControlLabel {
+                                    text: "Softness";
+                                }
+
+                                Slider {
+                                    minimum: 0;
+                                    maximum: 100;
+                                    value: 30;
+                                    changed(v) => {
+                                        root.set-key-param("softness", v);
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                ControlLabel {
+                                    text: "Luma Cutoff";
+                                }
+
+                                Slider {
+                                    minimum: 0;
+                                    maximum: 255;
+                                    value: 16;
+                                    changed(v) => {
+                                        root.set-key-param("luma-low", v);
+                                    }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            ControlLabel {
+                                text: "Smoothing (De-Flicker)";
+                            }
+
+                            Slider {
+                                minimum: 0;
+                                maximum: 100;
+                                value: 0;
+                                changed(v) => {
+                                    root.set-key-param("smoothing", v);
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. OUTPUTS (Moved to Sidebar for Visibility)
+                Rectangle {
+                        background: #2a2a3a;
+                        border-radius: 8px;
+                        clip: true;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 12px;
+                            SectionHeader {
+                                text: "4. OUTPUTS";
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                            // Virtual Screen
+                            Button {
+                                    text: "Virtual: OFF";
+                                    width: 50%;
+                                    clicked => {
+                                        if (self.text == "Virtual: OFF") {
+                                            self.text = "Virtual: ON";
+                                            root.toggle-output("VirtualScreen", true);
+                                        } else {
+                                            self.text = "Virtual: OFF";
+                                            root.toggle-output("VirtualScreen", false);
+                                        }
+                                    }
+                                }
+                            // NDI
+                            Button {
+                                    text: "NDI: OFF";
+                                    width: 50%;
+                                    clicked => {
+                                        if (self.text == "NDI: OFF") {
+                                            self.text = "NDI: ON";
+                                            root.toggle-output("NDI", true);
+                                        } else {
+                                            self.text = "NDI: OFF";
+                                            root.toggle-output("NDI", false);
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                            // DeckLink
+                            Button {
+                                    text: "DeckLink: OFF";
+                                    width: 50%;
+                                    clicked => {
+                                        if (self.text == "DeckLink: OFF") {
+                                            self.text = "DeckLink: ON";
+                                            root.toggle-output("DeckLink", true);
+                                        } else {
+                                            self.text = "DeckLink: OFF";
+                                            root.toggle-output("DeckLink", false);
+                                        }
+                                    }
+                                }
+                            // Monitor
+                            Button {
+                                    text: "Monitor: OFF";
+                                    width: 50%;
+                                    clicked => {
+                                        if (self.text == "Monitor: OFF") {
+                                            self.text = "Monitor: ON";
+                                            root.toggle-output("DeckLinkMonitor", true);
+                                        } else {
+                                            self.text = "Monitor: OFF";
+                                            root.toggle-output("DeckLinkMonitor", false);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                    } // Spacer
+                }
             }
         }
 
-        // Controls
-        HorizontalBox {
-            spacing: 10px;
+        // === RIGHT MAIN AREA ===
+        VerticalLayout {
+            padding: 16px;
+            spacing: 16px;
+            
+            // Preview
+            Rectangle {
+                background: #000000;
+                border-radius: 8px;
+                border-color: #333355;
+                border-width: 2px;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                clip: true;
 
-            // Source Selection
-            VerticalBox {
-                alignment: start;
-                spacing: 3px;
-
-                Text {
-                    text: "Source Type";
-                    color: #8888aa;
-                    font-size: 11px;
+                Image {
+                    source: root.preview-image;
+                    width: 100%;
+                    height: 100%;
+                    image-fit: contain;
                 }
 
-                ComboBox {
-                    model: root.source-type-list;
-                    current-value: "Screen";
-                    selected(val) => {
-                        root.select-source-type(val);
-                    }
-                }
-
-                HorizontalBox {
-                    spacing: 4px;
-                    Text {
-                        text: "Device";
-                        color: #8888aa;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                    }
-
-                    Button {
-                        text: "↻";
-                        clicked => {
-                            root.refresh-sources();
-                        }
-                    }
-                }
-
-                ComboBox {
-                    model: root.device-list;
-                    selected(val) => {
-                        root.select-device(self.current-index);
-                    }
+                if root.preview-image.width == 0: Text {
+                    text: "NO SIGNAL";
+                    color: #444455;
+                    font-size: 32px;
+                    font-weight: 700;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                 }
             }
 
-            // Resolution Selection
-            VerticalBox {
-                alignment: start;
-                spacing: 3px;
+            // Bottom Bar: Outputs & Settings
+            Rectangle {
+                height: 80px;
+                background: #222233;
+                border-radius: 8px;
+                HorizontalLayout {
+                    padding: 12px;
+                    spacing: 24px;
+                    alignment: start;
 
-                Text {
-                    text: "Input Resolution";
-                    color: #8888aa;
-                    font-size: 11px;
-                }
+                    // Output Resolutions
+                    VerticalLayout {
+                        spacing: 4px;
+                        SectionHeader {
+                            text: "RESOLUTIONS";
+                        }
 
-                ComboBox {
-                    model: root.resolution-list;
-                    current-index: 2;
-                    current-value: "Full HD (1920x1080)";
-                    selected(val) => {
-                        root.select-input-resolution(self.current-index);
-                    }
-                }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout {
+                                ControlLabel {
+                                    text: "Input";
+                                }
 
-                Text {
-                    text: "Output Resolution";
-                    color: #8888aa;
-                    font-size: 11px;
-                }
+                                ComboBox {
+                                    model: root.resolution-list;
+                                    current-index: 2;
+                                    current-value: "Full HD (1920x1080)";
+                                    selected(idx) => {
+                                        root.select-input-resolution(self.current-index);
+                                    }
+                                }
+                            }
 
-                ComboBox {
-                    model: root.resolution-list;
-                    current-index: 2;
-                    current-value: "Full HD (1920x1080)";
-                    selected(val) => {
-                        root.select-output-resolution(self.current-index);
-                    }
-                }
-            }
+                            VerticalLayout {
+                                ControlLabel {
+                                    text: "Output";
+                                }
 
-            // Info + Output Controls
-            VerticalBox {
-                alignment: start;
-                spacing: 3px;
-
-                Text {
-                    text: root.source-name;
-                    color: #ccccee;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
-
-                Text {
-                    text: root.source-details;
-                    color: #7777aa;
-                    font-size: 10px;
-                }
-
-                Text {
-                    text: "Outputs";
-                    color: #8888aa;
-                    font-size: 11px;
-                }
-
-                HorizontalBox {
-                    spacing: 6px;
-                    Text {
-                        text: "NDI";
-                        color: #ccccee;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-
-                    Button {
-                        text: "OFF";
-                        clicked => {
-                            if (self.text == "OFF") {
-                                self.text = "ON";
-                                root.toggle-output("NDI", true);
-                            } else {
-                                self.text = "OFF";
-                                root.toggle-output("NDI", false);
+                                ComboBox {
+                                    model: root.resolution-list;
+                                    current-index: 2;
+                                    current-value: "Full HD (1920x1080)";
+                                    selected(idx) => {
+                                        root.select-output-resolution(self.current-index);
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                HorizontalBox {
-                    spacing: 6px;
-                    Text {
-                        text: "DeckLink";
-                        color: #ccccee;
-                        font-size: 12px;
-                        vertical-alignment: center;
+                    Rectangle {
+                        width: 1px;
+                        background: #444;
                     }
-
-                    Button {
-                        text: "OFF";
-                        clicked => {
-                            if (self.text == "OFF") {
-                                self.text = "ON";
-                                root.toggle-output("DeckLink", true);
-                            } else {
-                                self.text = "OFF";
-                                root.toggle-output("DeckLink", false);
-                            }
-                        }
-                    }
-                }
-
-                // Virtual Screen toggle
-                HorizontalBox {
-                    spacing: 6px;
-                    Text {
-                        text: "Virtual Screen";
-                        color: #55ddaa;
-                        font-size: 12px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-
-                    Button {
-                        text: "OFF";
-                        clicked => {
-                            if (self.text == "OFF") {
-                                self.text = "ON";
-                                root.toggle-output("VirtualScreen", true);
-                            } else {
-                                self.text = "OFF";
-                                root.toggle-output("VirtualScreen", false);
-                            }
-                        }
-                    }
-                }
-
-                // DeckLink Monitor toggle (모니터링)
-                HorizontalBox {
-                    spacing: 6px;
-                    Text {
-                        text: "DL Monitor";
-                        color: #dd8855;
-                        font-size: 12px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                    }
-
-                    Button {
-                        text: "OFF";
-                        clicked => {
-                            if (self.text == "OFF") {
-                                self.text = "ON";
-                                root.toggle-output("DeckLinkMonitor", true);
-                            } else {
-                                self.text = "OFF";
-                                root.toggle-output("DeckLinkMonitor", false);
-                            }
-                        }
+                    
+                    // Spacer to replace removed outputs
+                    Rectangle {
+                        horizontal-stretch: 1;
                     }
                 }
             }
