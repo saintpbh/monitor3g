@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use crate::core::{StopSignal, ResolutionState, RESOLUTION_PRESETS};
+use slint::Model;
 
 slint::include_modules!();
 
@@ -637,11 +638,24 @@ async fn main() -> Result<(), slint::PlatformError> {
         },
     );
 
+    let ui_key_toggle_ui = ui.as_weak();
+    let layer_key_enables_ui_handle = layer_key_enables_ui.clone();
     ui.on_toggled_layer_key(move |idx, enabled| {
         let idx = idx as usize;
-        if idx < layer_key_enables_ui.len() {
-            layer_key_enables_ui[idx].store(enabled, Ordering::Relaxed);
+        if idx < layer_key_enables_ui_handle.len() {
+            layer_key_enables_ui_handle[idx].store(enabled, Ordering::Relaxed);
             println!("[Main] Layer {} Key Enable: {}", idx, enabled);
+            
+            // Update UI State to reflect change (visual feedback)
+            if let Some(ui) = ui_key_toggle_ui.upgrade() {
+                 let current_model = ui.get_layer_key_enabled();
+                 let mut vec_data: Vec<bool> = current_model.iter().collect();
+                 if idx < vec_data.len() {
+                     vec_data[idx] = enabled;
+                     let new_model = std::rc::Rc::new(slint::VecModel::from(vec_data));
+                     ui.set_layer_key_enabled(slint::ModelRc::from(new_model));
+                 }
+            }
         }
     });
 

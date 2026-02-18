@@ -160,7 +160,7 @@ pub async fn run_compositor(
                     // Apply if GLOBAL key is enabled AND LAYER key is enabled
                     let layer_key_on = layer_key_enables[i].load(std::sync::atomic::Ordering::Relaxed);
                     
-                    let working_data = if key_state.is_enabled() && layer_key_on {
+                    let working_data = if layer_key_on {
                          let mut d = data.to_vec();
                          let pixel_count = (frame.width * frame.height) as usize;
                          
